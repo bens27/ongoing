@@ -1,0 +1,80 @@
+name: CI
+
+# One workflow, the same commands a person runs before committing. If `bun run lint`,
+# `bun run test`, `bun run check`, `bun run build`, or `bun run test:e2e` passes here and fails
+# locally, the difference is the machine, not the pipeline.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      # `.bun-version` is the only place the Bun version is written down, and
+      # `tests/foundation.test.ts` fails if anything else restates it — including this file.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run check
+      - run: bun run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      # Provider fields like `loc.code` and `td.total` only register when their commands exist on
+      # PATH (ADR 0007). GitHub runners already have `git` and `gh`; install the rest so e2e can
+      # exercise the same projected columns a local Aerie session sees.
+      - name: Install cloc and td
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cloc
+          td_tag=$(curl -fsSL https://api.github.com/repos/marcus/td/releases/latest | jq -r .tag_name)
+          td_ver=${td_tag#v}
+          curl -fsSL "https://github.com/marcus/td/releases/download/${td_tag}/td_${td_ver}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin td
+          td --version
+          cloc --version
+
+      # Chromium alone: the suite asserts behaviour and contrast, not rendering differences
+      # between engines, and every mutation it makes is checked again through `bin/ongoing`.
+      - run: bunx playwright install --with-deps chromium
+
+      # A port nothing else on a runner listens on, so `reuseExistingServer` cannot pick up
+      # a stranger — the failure mode Phase 2 fixed. `test:e2e` runs `svelte-kit sync` first so
+      # Bun can resolve `$lib` while seeding the fixture (no prior `check` job shares this workspace).
+      - run: bun run test:e2e
+        env:
+          E2E_PORT: 7801
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "id": "ongoing",
+  "title": "Ongoing",
+  "description": "Which local projects deserve attention: one API, two clients, a cache-first scanner, and an app-owned catalog.",
+  "provenance": "Authored 2026-09-11 from the Ongoing source tree, ADRs, README, AGENTS.md, deployment and website docs; updated as each phase of the inventory redesign landed, through Phase 6 on 2026-09-12. Every current component cites the files inspected. The catalog repository is modeled as one component rather than per table; the Svelte component tree and the test suites are intentionally shallow. Nothing in the 'Software inventory' or 'Tech radar' subsystems is proposed any more: the whole plan is implemented, and every element cites code. The 'Project overview' subsystem was authored as a proposal on 2026-09-13 and rewritten as current behaviour on 2026-09-14 when its four slices (shared model and panel, history read, dated charts, fact sheet) merged; its evidence now cites the shipped modules, and the design study under docs/mockups is a reference rather than a claim.",
+  "boundaries": [
+    {
+      "id": "api-parity",
+      "title": "Same HTTP contract",
+      "description": "Both clients go through the JSON API. A capability reachable only through the browser would be a design bug, and since Phase 4 a Playwright test drives bin/ongoing against the same server for every mutation the browser makes. The entries API extends the same contract to fields, relations, and saved views, and the URL the shell writes is the query ongoing list sends. The project history read is the same shape: one application function behind the HTTP route, the in-process transport, and ongoing history.",
+      "kind": "parity",
+      "members": [
+        "cli.client",
+        "cli.read_cmds",
+        "cli.edit_cmds",
+        "cli.scan_cmd",
+        "service.projects_api",
+        "service.scan_api",
+        "service.website_api",
+        "inventory.entry_cli",
+        "inventory.entries_api",
+        "inventory.shell",
+        "inventory.palette",
+        "inventory.entry_page",
+        "inventory.transport",
+        "inventory.url_state",
+        "inventory.optimistic",
+        "inventory.providers_page",
+        "radar.page",
+        "project-detail-history"
+      ],
+      "color": "#759EB5"
+    },
+    {
+      "id": "request-gate",
+      "title": "LAN request boundary",
+      "description": "Every request crosses the production edge and the SvelteKit gate: bounded bodies, security headers, and, when enabled, session and same-origin checks. Auth is intentionally off in production.",
+      "kind": "trust",
+      "members": ["service.edge", "service.gate", "service.security", "web.login"],
+      "color": "#739886"
+    },
+    {
+      "id": "pure-domain",
+      "title": "Pure rules, no I/O",
+      "description": "Functions of normalized data only. The browser validates a patch, re-runs attention classification, and parses, filters and sorts a query with exactly the code the server runs, which is what makes an optimistic edit correct and a list operation free of a round trip.",
+      "kind": "ownership",
+      "members": [
+        "domain.attention",
+        "domain.stack",
+        "domain.project",
+        "domain.website",
+        "domain.contracts",
+        "inventory.registry",
+        "inventory.query",
+        "inventory.optimistic",
+        "inventory.url_state",
+        "inventory.completeness",
+        "project-detail-summary"
+      ],
+      "color": "#89A579"
+    },
+    {
+      "id": "lease-holders",
+      "title": "One scan at a time",
+      "description": "Manual and calendar requests use the deployed scanner. The durable scan lease prevents overlap, including with explicit standalone local scans.",
+      "kind": "permission",
+      "members": ["scanning.scanner", "service.runtime", "catalog.repository", "catalog.sqlite"],
+      "color": "#9A91C4"
+    },
+    {
+      "id": "egress",
+      "title": "Subprocess and network egress",
+      "description": "Everything that spawns a tool or leaves the machine. Each path has a timeout and an availability state; none can fail a whole scan.",
+      "kind": "trust",
+      "members": [
+        "scanning.process",
+        "scanning.git",
+        "scanning.loc",
+        "scanning.td",
+        "scanning.github",
+        "scanning.github_client",
+        "scanning.github_provider",
+        "scanning.endoflife",
+        "scanning.baseline",
+        "external.tools",
+        "external.td_serve",
+        "external.github",
+        "external.endoflife",
+        "inventory.remote_discovery"
+      ],
+      "color": "#C48282"
+    },
+    {
+      "id": "durable-state",
+      "title": "App-owned durable state",
+      "description": "Ongoing's SQLite file and the release tooling that backs it up, migrates it, and restores it. Never a repository's .todos database.",
+      "kind": "storage",
+      "members": [
+        "catalog.database",
+        "catalog.repository",
+        "catalog.sqlite",
+        "ops.release",
+        "ops.smoke",
+        "inventory.entries"
+      ],
+      "color": "#B59669"
+    },
+    {
+      "id": "public-copy",
+      "title": "Public website copy",
+      "description": "The only data that leaves the private dashboard: explicitly included website records and the selected project logos, exported deterministically, without notes, paths, or scanned metrics.",
+      "kind": "ownership",
+      "members": [
+        "domain.website",
+        "service.website_api",
+        "service.attachments_api",
+        "cli.edit_cmds",
+        "external.opentangle",
+        "external.logo_sites"
+      ],
+      "color": "#A69B8C"
+    },
+    {
+      "id": "adapter-seams",
+      "title": "Switchable seams",
+      "description": "Every assumption that used to be baked in — where repositories live, who hosts them, who tracks issues, who counts lines, what runs the service, where it deploys, and who reads the export — is now declared in a manifest or an adapter and switched in one TOML file. A provider that is off or missing its tools registers no fields, so the rules that read them go inert rather than wrong. This is what lets Ongoing run on a machine that is not aerie.",
+      "kind": "ownership",
+      "members": [
+        "inventory.providers",
+        "inventory.config",
+        "inventory.host",
+        "inventory.profile",
+        "inventory.transport",
+        "radar.signatures",
+        "scanning.wiring",
+        "inventory.remote_discovery",
+        "inventory.install"
+      ],
+      "color": "#9A91C4"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "overview",
+      "title": "Ongoing at a glance",
+      "description": "One local process serves a browser and a CLI from an app-owned catalog that a bounded scanner keeps fresh.",
+      "expanded": [],
+      "proposed": false,
+      "lens": "structure"
+    },
+    {
+      "id": "one-api-two-clients",
+      "title": "One API, two clients",
+      "description": "The CLI and the browser are peers: both read the same entries endpoint and send the same validated patches through the same routes, behind the same gate. Since Phase 4 the browser builds the query string the CLI builds, out of the same shared functions.",
+      "expanded": ["cli", "web", "service"],
+      "proposed": false,
+      "lens": "structure"
+    },
+    {
+      "id": "scan-pipeline",
+      "title": "How a scan refreshes the catalog",
+      "description": "Discovery first, then git, TD, and stack per project, cloc only when the worktree changed, then release baselines and GitHub once per run.",
+      "expanded": ["scanning"],
+      "proposed": false,
+      "lens": "structure",
+      "scope": "scanning"
+    },
+    {
+      "id": "catalog-and-rules",
+      "title": "From cached rows to attention views",
+      "description": "The read model joins catalog tables, resolves stacks against baselines, and asks the pure domain rules which views each project belongs to and why.",
+      "expanded": ["catalog", "domain"],
+      "proposed": false,
+      "lens": "structure"
+    },
+    {
+      "id": "entry-model",
+      "title": "Entries, fields, and relations",
+      "description": "What Phases 1 and 2 built: one entries table with a source per provider, a registry that validates every patch, one query grammar that reads them all, and one API and CLI over the lot. The project dashboard is a projection of the same rows.",
+      "expanded": ["inventory"],
+      "proposed": false,
+      "lens": "structure",
+      "scope": "inventory"
+    },
+    {
+      "id": "outside-the-process",
+      "title": "Tools, APIs, and hosts",
+      "description": "What Ongoing spawns, calls, or is scheduled by, and how each dependency is allowed to fail.",
+      "expanded": ["scanning", "external"],
+      "proposed": false,
+      "lens": "structure"
+    },
+    {
+      "id": "operations",
+      "title": "Running on aerie.local",
+      "description": "Immutable builds keep live routes safe; the calendar requests scans from the deployed web service.",
+      "expanded": ["ops"],
+      "proposed": false,
+      "lens": "structure",
+      "scope": "ops"
+    },
+    {
+      "id": "trust-boundaries",
+      "title": "Boundaries and authority",
+      "description": "Where requests are gated, which code is pure, who may hold the scan lease, what leaves the machine, and what is allowed to go public.",
+      "expanded": ["cli", "web", "service", "domain", "scanning", "catalog", "ops", "external"],
+      "proposed": false,
+      "lens": "trust"
+    },
+    {
+      "id": "inventory",
+      "title": "Ongoing as a software inventory",
+      "description": "The whole redesign in one frame, and it has all landed: entries, the field registry, the query grammar, the entries API, the CLI and its transport, the keyboard-first browser shell that builds the same query string, the provider manifests, one configuration file, the host adapter, the deployment and export profiles, and Phase 6 — completeness from the registry, repositories with no local checkout, and an install that is two commands.",
+      "expanded": ["inventory"],
+      "proposed": false,
+      "lens": "structure",
+      "theme": "graphite",
+      "scope": "inventory"
+    },
+    {
+      "id": "inventory-shell",
+      "title": "The inventory shell",
+      "description": "What the browser is since Phase 4: one layout load of the whole catalog, a table filtered and sorted in the browser by the same pure functions the API runs, the URL carrying the query a CLI invocation would carry, and edits applied locally against the registry and the attention rules before the server answers. Every mutation here has an ongoing verb behind the same endpoint.",
+      "expanded": ["inventory"],
+      "proposed": false,
+      "lens": "structure",
+      "theme": "graphite",
+      "scope": "inventory"
+    },
+    {
+      "id": "tech-radar",
+      "title": "The tech radar",
+      "description": "Technologies as a second entry kind with rings, uses relations detected by the tech-signatures provider inside the stack collector pass or declared by hand, ongoing tech verbs over the same query model, the generator that renders the project-standards tables, and the radar page where a ring is editable on the chip.",
+      "expanded": ["radar"],
+      "lens": "structure",
+      "theme": "graphite",
+      "scope": "radar",
+      "proposed": false
+    },
+    {
+      "id": "switchable-seams",
+      "title": "Seams and boundaries",
+      "description": "The inventory subsystem under the trust lens: which parts share the one API contract, which are pure rules the browser re-runs, what the durable state is, and which pieces exist so that discovery, hosting, issues, lines of code, the serving host, the deploy target and the export stop being assumptions. All of them are built, including the two that arrived last: a repository does not have to be on this disk to be an entry, and installing it somewhere else is `ongoing init`.",
+      "expanded": ["inventory"],
+      "proposed": false,
+      "lens": "trust",
+      "theme": "graphite",
+      "scope": "inventory"
+    },
+    {
+      "id": "project-detail-redesign",
+      "title": "One project, two compositions",
+      "description": "One shared overview model and one focused history read feed a set of section components, composed compactly as the inventory panel and wide as the /p/<slug> fact sheet. Catalog validation, optimistic mutation and undo stay where they were; the overview only chooses what to say first.",
+      "scope": "project-detail-redesign",
+      "expanded": ["project-detail-redesign"],
+      "proposed": false,
+      "lens": "structure",
+      "theme": "graphite"
+    }
+  ]
+}

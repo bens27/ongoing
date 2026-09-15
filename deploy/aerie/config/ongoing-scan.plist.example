@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.marcusvorwaller.ongoing.scan</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/marcus/.local/share/ongoing/bun</string>
+    <string>run</string>
+    <string>/Users/marcus/code/ongoing/scripts/scan.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/marcus/code/ongoing</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- HTTP only; the deployed web process owns collectors and database configuration. -->
+    <key>PATH</key><string>/Users/marcus/.local/share/mise/shims:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>ONGOING_URL</key><string>http://127.0.0.1:7766</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>3</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key><string>/Users/marcus/Library/Logs/Ongoing/scan-stdout.log</string>
+  <key>StandardErrorPath</key><string>/Users/marcus/Library/Logs/Ongoing/scan-stderr.log</string>
+</dict>
+</plist>

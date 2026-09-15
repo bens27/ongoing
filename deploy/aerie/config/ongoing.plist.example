@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.marcusvorwaller.ongoing</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/marcus/.local/share/ongoing/bun</string>
+    <string>/Users/marcus/code/ongoing/scripts/production-server.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/marcus/code/ongoing</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Collectors shell out to cloc, td, and gh; launchd's default PATH has none of them, and gh is a mise shim. Keep in sync with ongoing-scan.plist.example. -->
+    <key>PATH</key><string>/Users/marcus/.local/share/mise/shims:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOST</key><string>0.0.0.0</string>
+    <key>PORT</key><string>7766</string>
+    <key>ORIGIN</key><string>http://aerie.local:7766</string>
+    <key>APP_ORIGIN</key><string>http://aerie.local:7766</string>
+    <key>SESSION_COOKIE_SECURE</key><string>false</string>
+    <key>BODY_SIZE_LIMIT</key><string>16384</string>
+    <key>SCAN_ROOTS</key><string>/Users/marcus/code</string>
+    <key>DATABASE_PATH</key><string>/Users/marcus/Library/Application Support/Ongoing/ongoing.sqlite</string>
+    <key>ONGOING_ENABLE_SCAN_SCHEDULER</key><string>false</string>
+    <key>ONGOING_ACCESS_SECRET</key><string>REPLACE_OUTSIDE_GIT_WITH_A_LONG_RANDOM_SECRET</string>
+    <!-- Local-network only: bypass the access-secret login. Remove this key (or set false) to re-enable auth. See docs/auth.md. -->
+    <key>ONGOING_DISABLE_AUTH</key><string>true</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/marcus/Library/Logs/Ongoing/stdout.log</string>
+  <key>StandardErrorPath</key><string>/Users/marcus/Library/Logs/Ongoing/stderr.log</string>
+</dict>
+</plist>

@@ -1,0 +1,40 @@
+# Dependencies and generated application state
+node_modules/
+.svelte-kit/
+/build
+coverage/
+playwright-report/
+test-results/
+
+# Local configuration, credentials, and persistent data
+.env
+.env.*
+!.env.example
+
+# Private logo overlay (Marcus's own artwork tooling, not open source).
+# Drop the tarball here and `bun add file:./vendor/impressions-logo-<version>.tgz` to
+# enable logo support locally; keep package.json/bun.lock reverted afterwards.
+vendor/
+.data/
+.deploy/
+
+# TD is local workflow state, not application source
+.todos/
+
+# Editors and operating systems
+.DS_Store
+*.swp
+.sidecar/
+.sidecar-agent
+.sidecar-task
+.sidecar-pr
+.sidecar-start.sh
+.sidecar-base
+.td-root
+
+# graphify knowledge graph cache (rebuilt by clara-home bin/graphify-refresh)
+graphify-out/
+.claude/worktrees/
+
+.ongoing-builds/
+.ongoing-build-*

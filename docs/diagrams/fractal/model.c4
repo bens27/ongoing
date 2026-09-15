@@ -1,0 +1,663 @@
+// Authored architecture for Ongoing. Evidence paths are relative to the repository root.
+specification {
+  element actor
+  element subsystem
+  element component
+  element adapter
+  element service
+  element store
+  element job
+  relationship calls
+  relationship reads
+  relationship writes
+  relationship streams
+  relationship runs
+  relationship supplies
+  relationship polls
+  relationship schedules
+  tag current
+  tag proposed
+}
+
+model {
+  user = actor 'Marcus or an agent' {
+    description 'Decides which local projects deserve attention, from a browser or a shell.'
+    metadata { uid 'user' fractalColor '#759EB5' evidence 'README.md' }
+  }
+
+  cli = subsystem 'ongoing CLI' {
+    description 'Terminal client with full parity: it speaks the same HTTP API as the browser and never opens SQLite directly.'
+    metadata { uid 'cli' fractalColor '#82A6B6' evidence ['bin/ongoing.ts', 'docs/cli.md'] }
+
+    client = component 'API client & session' {
+      description 'Resolves --url / ONGOING_URL, stores the session cookie in ~/.config/ongoing/session (login posts the secret to /login when auth is on), and resolves project tokens by id, name, or path.'
+      metadata { uid 'cli.client' fractalColor '#82A6B6' evidence ['bin/ongoing.ts'] }
+    }
+    read_cmds = component 'Read commands' {
+      description 'list, show, views, stacks, status, path: dashboard ordering, attention reasons, toolchain lag, and service state as tables or JSON.'
+      metadata { uid 'cli.read_cmds' fractalColor '#82A6B6' evidence ['bin/ongoing.ts', 'docs/cli.md'] }
+    }
+    edit_cmds = component 'Edit commands' {
+      description 'favorite, hide, unhide, forget, prune, note, set, website: the same fields the drawer edits, plus website copy and selection.'
+      metadata { uid 'cli.edit_cmds' fractalColor '#82A6B6' evidence ['bin/ongoing.ts', 'docs/website.md'] }
+    }
+    scan_cmd = component 'scan command' {
+      description 'Starts a manual or per-project scan with an optional refresh policy and polls the catalog until the run settles when --wait is given.'
+      metadata { uid 'cli.scan_cmd' fractalColor '#82A6B6' evidence ['bin/ongoing.ts'] }
+    }
+    service_cmds = component 'Service commands' {
+      description 'build, restart, stop, logs, dev: the only verbs that touch the machine (launchctl, log files) rather than the API.'
+      metadata { uid 'cli.service_cmds' fractalColor '#82A6B6' evidence ['bin/ongoing.ts', 'AGENTS.md'] }
+    }
+  }
+
+  web = subsystem 'Browser' {
+    description 'The SvelteKit pages. Since Phase 4 the browser is the inventory shell — see the Software inventory subsystem for what it is made of — and this subsystem holds what is not part of it.'
+    metadata { uid 'web' fractalColor '#759EB5' evidence ['src/routes/(inventory)/+layout.svelte', 'src/routes/(inventory)/+page.svelte'] }
+
+    login = component 'Login form' {
+      description 'Form action that checks the access secret in constant time, rate-limits attempts per address, and sets the session cookie.'
+      metadata { uid 'web.login' fractalColor '#759EB5' evidence ['src/routes/login/+page.server.ts', 'src/routes/login/+page.svelte', 'docs/auth.md'] }
+    }
+  }
+
+  service = subsystem 'HTTP service' {
+    description 'The single local process: request gate, JSON API, and the composition root that owns the catalog and scanner.'
+    metadata { uid 'service' fractalColor '#739886' evidence ['src/hooks.server.ts', 'src/lib/server/scanning/runtime.ts'] }
+
+    edge = component 'Production edge' {
+      description 'Pins one immutable adapter build at startup, counts raw mutation bytes, rejects oversized bodies, and forwards to a private loopback listener. Publishing a build never changes live imports or assets.'
+      metadata { uid 'service.edge' fractalColor '#739886' evidence ['src/lib/host/production-server.ts', 'src/lib/host/build.ts', 'docs/deployment.md'] }
+    }
+    gate = component 'Request gate' {
+      description 'SvelteKit handle: session check for private paths, same-origin check for mutations when auth is on, bounded bodies, security headers, and the development scan scheduler trigger.'
+      metadata { uid 'service.gate' fractalColor '#739886' evidence ['src/hooks.server.ts', 'src/lib/server/scanning/automatic.ts'] }
+    }
+    security = component 'Sessions & secret' {
+      description 'HMAC session tokens, cookie options, constant-time secret comparison, and body buffering. Auth is intentionally disabled in production.'
+      metadata { uid 'service.security' fractalColor '#739886' evidence ['src/lib/server/security.ts', 'docs/auth.md', 'AGENTS.md'] }
+    }
+    projects_api = component 'Projects API' {
+      description 'GET /api/projects builds the page model; PATCH/DELETE/POST on /api/projects/:id edit notes and decisions, forget, or open locally; favorite, hide, reorder, and prune (dry-run by default, via discovery) are sibling routes.'
+      metadata { uid 'service.projects_api' fractalColor '#739886' evidence ['src/routes/api/projects/+server.ts', 'src/routes/api/projects/[id]/+server.ts', 'src/routes/api/projects/prune/+server.ts', 'src/lib/server/projects/actions.ts'] }
+    }
+    scan_api = component 'Scan API & events' {
+      description 'POST /api/scan starts a run (409 while one is active); GET /api/scan/events replays and streams progress as Server-Sent Events with a resumable cursor.'
+      metadata { uid 'service.scan_api' fractalColor '#739886' evidence ['src/routes/api/scan/+server.ts', 'src/routes/api/scan/events/+server.ts', 'src/lib/server/scanning/sse.ts'] }
+    }
+    website_api = component 'Website API' {
+      description 'Public-copy endpoints: per-project website metadata, standalone pages, and the deterministic live or draft export that OpenTangle consumes.'
+      metadata { uid 'service.website_api' fractalColor '#739886' evidence ['src/routes/api/website/+server.ts', 'src/routes/api/projects/[id]/website/+server.ts', 'src/routes/api/website/pages/+server.ts'] }
+    }
+    attachments_api = component 'Rich attachment API' {
+      description 'Imports, reads and exports trusted rich-field bundles with field-specific revision checks; immutable artifact reads carry content hashes and long-lived cache headers. GET /api/logos lists the current identity logo of every project for consumer-site pulls.'
+      metadata { uid 'service.attachments_api' fractalColor '#739886' evidence ['src/routes/api/attachments/[id]/[field]/+server.ts', 'src/routes/api/artifacts/[hash]/+server.ts', 'src/routes/api/logos/+server.ts', 'src/lib/server/attachments.ts', 'src/lib/domain/logo-set.ts'] }
+    }
+    rich_adapters = adapter 'Trusted rich-field adapters' {
+      description 'Code-registered document validators and lazy UI renderers. Unknown adapters preserve their JSON and poster fallback without loading executable field content.'
+      metadata { uid 'service.rich_adapters' fractalColor '#739886' evidence ['src/lib/domain/rich-fields.ts', 'src/lib/ui/rich-field-adapters.ts', 'src/lib/ui/RichFieldPreview.svelte'] }
+    }
+    runtime = component 'Composition root' {
+      description 'Loads config, opens the catalog, wires the scanner with the production collector set, and retries enrichment for a restored project until no scan is running.'
+      metadata { uid 'service.runtime' fractalColor '#739886' evidence ['src/lib/server/scanning/runtime.ts', 'src/lib/server/config.ts'] }
+    }
+  }
+
+  domain = subsystem 'Domain rules' {
+    description 'Pure functions over normalized project data. No I/O, no provider types, so the browser can re-run them after an optimistic edit.'
+    metadata { uid 'domain' fractalColor '#89A579' evidence ['src/lib/domain/attention.ts', 'src/lib/domain/project.ts'] }
+
+    readmodel = component 'Catalog read model' {
+      description 'Merges an entry\'s columns, attributes, and projected provider metrics into one flat field map, and derives what the grammar needs but nothing stores: path, is_missing, the attention views, the collector warning count, linked technologies, stack lag, and the 30-day deltas. The dashboard projection over the same rows still builds DashboardProject for the current browser.'
+      metadata { uid 'domain.readmodel' fractalColor '#89A579' evidence ['src/lib/server/catalog/entries.ts', 'src/lib/dashboard/catalog.ts', 'src/lib/dashboard/options.ts'] }
+    }
+    attention = component 'Attention views' {
+      description 'Seven independent classifications with explicit thresholds and a 72-hour freshness gate; every membership carries its reasons. No grand score. The radar adds two: a project using an out technology joins upgrade, and a technology whose ring is past review_after puts its users in attention — ungated, because an edge is a catalog fact rather than a measurement.'
+      metadata { uid 'domain.attention' fractalColor '#89A579' evidence ['src/lib/domain/attention.ts', 'src/lib/domain/attention.test.ts'] }
+    }
+    stack = component 'Stack resolution' {
+      description 'Compares a declared toolchain version to cached release cycles: current, behind by supported cycles, end-of-life, or unknown.'
+      metadata { uid 'domain.stack' fractalColor '#89A579' evidence ['src/lib/domain/stack.ts', 'docs/adr/0004-toolchain-baselines.md'] }
+    }
+    project = component 'Project & decision rules' {
+      description 'Intent vocabulary, note and next-action limits, decision validation, and sparse manual rank assignment for reordering.'
+      metadata { uid 'domain.project' fractalColor '#89A579' evidence ['src/lib/domain/project.ts', 'src/lib/domain/sorting.ts'] }
+    }
+    website = component 'Website copy rules' {
+      description 'Validates public copy patches, decides eligibility from repository visibility or an explicit override, and produces the deterministic export envelope.'
+      metadata { uid 'domain.website' fractalColor '#89A579' evidence ['src/lib/domain/website.ts', 'docs/website.md'] }
+    }
+    contracts = component 'Provider contracts' {
+      description 'IssueMetrics and HostingMetrics shapes and the provider interfaces the rest of the app consumes instead of TD records or GitHub responses.'
+      metadata { uid 'domain.contracts' fractalColor '#89A579' evidence ['src/lib/domain/scanning.ts', 'src/lib/domain/metrics.ts', 'docs/adr/0002-provider-adapters.md'] }
+    }
+  }
+
+  scanning = subsystem 'Scanner & collectors' {
+    description 'Cache-first, bounded refresh of the catalog under a durable lease: local collectors spawn tools, remote adapters degrade to availability states, and nothing fails a whole scan.'
+    metadata { uid 'scanning' fractalColor '#9A91C4' evidence ['src/lib/server/scanning/scanner.ts', 'docs/adr/0003-scan-strategy.md', 'docs/adr/0002-provider-adapters.md'] }
+
+    scanner = component 'Scan orchestrator' {
+      description 'Acquires the lease, heartbeats it, runs git, TD, and stack per project under concurrency limits, gates cloc by policy, then refreshes baselines and GitHub. A failed collector records a warning and keeps the last result.'
+      metadata { uid 'scanning.scanner' fractalColor '#9A91C4' evidence ['src/lib/server/scanning/scanner.ts', 'src/lib/server/scanning/limit.ts'] }
+    }
+    wiring = component 'Collector wiring' {
+      description 'The collector dependency set used by the deployed web scanner and explicit standalone scans. Calendar jobs call the web scanner over HTTP.'
+      metadata { uid 'scanning.wiring' fractalColor '#9A91C4' evidence ['src/lib/server/scanning/dependencies.ts'] }
+    }
+    scheduler = component 'Development scheduler' {
+      description 'Deferred startup scan and five-minute cheap refresh, armed after the first private request. Disabled in production, where launchd owns the schedule.'
+      metadata { uid 'scanning.scheduler' fractalColor '#9A91C4' evidence ['src/lib/server/scanning/scheduler.ts', 'src/lib/server/scanning/automatic.ts'] }
+    }
+    progress = component 'Progress bus' {
+      description 'In-memory per-run event log with subscriptions; terminal events close the run and are re-sent on reconnect.'
+      metadata { uid 'scanning.progress' fractalColor '#9A91C4' evidence ['src/lib/server/scanning/progress.ts'] }
+    }
+
+    // Local collectors
+    discover = component 'Discovery & reconcile' {
+      description 'Walks scan roots to a bounded depth, canonicalizes each .git marker with git rev-parse, upserts rows, marks unseen projects missing, and forgets only confirmed-gone projects after a grace period.'
+      metadata { uid 'scanning.discover' fractalColor '#D4A373' evidence ['src/lib/server/collectors/discover.ts', 'src/lib/server/collectors/discover.test.ts'] }
+    }
+    git = component 'Git metrics' {
+      description 'Commit cadence over 7/30/90 days, churn, contributors, dirty files, ahead/behind, tags, and the tracked-worktree fingerprint that keys the cloc cache.'
+      metadata { uid 'scanning.git' fractalColor '#D4A373' evidence ['src/lib/server/collectors/git.ts'] }
+    }
+    loc = component 'Lines of code' {
+      description 'Runs cloc only when the fingerprint changed or a full refresh is forced; parses per-language totals and the dominant language.'
+      metadata { uid 'scanning.loc' fractalColor '#D4A373' evidence ['src/lib/server/collectors/loc.ts'] }
+    }
+    td = adapter 'TD issue adapter' {
+      description 'Prefers a running td serve on the port in .todos/serve-port, falls back to the td CLI, and reports open, in-progress, blocked, review, and stale counts.'
+      metadata { uid 'scanning.td' fractalColor '#D4A373' evidence ['src/lib/server/collectors/td.ts'] }
+    }
+    stack = component 'Stack declarations' {
+      description 'Reads declared toolchain versions from root manifests (go.mod, package.json, .tool-versions, mise.toml, Cargo.toml, Gemfile, Dockerfile, ...) on every policy.'
+      metadata { uid 'scanning.stack' fractalColor '#D4A373' evidence ['src/lib/server/collectors/stack.ts'] }
+    }
+    github = component 'GitHub enrichment' {
+      description 'Parses the origin remote, resolves origin errors, checks provider availability once per scan, then fetches hosting and traffic metrics when due and records star and traffic snapshots.'
+      metadata { uid 'scanning.github' fractalColor '#D4A373' evidence ['src/lib/server/collectors/github.ts'] }
+    }
+    process = component 'Subprocess runner' {
+      description 'Spawns commands with timeouts, output caps, abort signals, and process-group kill so one hung tool cannot stall a scan.'
+      metadata { uid 'scanning.process' fractalColor '#D4A373' evidence ['src/lib/server/collectors/process.ts'] }
+    }
+
+    // Remote provider adapters
+    github_client = adapter 'GitHub HTTP client' {
+      description 'Token from GH_TOKEN, GITHUB_TOKEN, or gh auth token; GraphQL and REST calls; remembers rate-limit resets and classifies failures as unauthenticated, rate-limited, or unavailable.'
+      metadata { uid 'scanning.github_client' fractalColor '#C48282' evidence ['src/lib/server/github/client.ts'] }
+    }
+    github_provider = adapter 'GitHub hosting provider' {
+      description 'Batched GraphQL for stars, PRs, issues, releases, and contributors; REST for workflow state and traffic. Implements HostingMetricsProvider.'
+      metadata { uid 'scanning.github_provider' fractalColor '#C48282' evidence ['src/lib/server/github/provider.ts'] }
+    }
+    endoflife = adapter 'endoflife.date provider' {
+      description 'Maps toolchains to endoflife.date products and parses release cycles. Java and Swift have no upstream product and resolve to unknown.'
+      metadata { uid 'scanning.endoflife' fractalColor '#C48282' evidence ['src/lib/server/releases/endoflife.ts'] }
+    }
+    baseline = component 'Release baseline refresh' {
+      description 'Refreshes cycles only for declared toolchains, at most daily on success and hourly after failure; a failure never discards cached cycles.'
+      metadata { uid 'scanning.baseline' fractalColor '#C48282' evidence ['src/lib/server/releases/baseline.ts', 'docs/adr/0004-toolchain-baselines.md'] }
+    }
+  }
+
+  catalog = subsystem 'App-owned catalog' {
+    description 'SQLite index and cache. Filesystem discovery stays authoritative; missing projects are kept so notes and decisions survive.'
+    metadata { uid 'catalog' fractalColor '#B59669' evidence ['src/lib/server/catalog/repository.ts', 'docs/adr/0001-app-owned-storage.md'] }
+
+    database = component 'Database & migrations' {
+      description 'Opens SQLite in WAL mode, serializes writes through one promise tail, and applies eight versioned migrations statement by statement inside transactions. Migration 007 moves projects into entries in TypeScript, because slugs have to be generated and de-duplicated.'
+      metadata { uid 'catalog.database' fractalColor '#B59669' evidence ['src/lib/server/catalog/database.ts', 'src/lib/server/catalog/migrations.ts', 'src/lib/server/catalog/migrations/007_entries.ts'] }
+    }
+    repository = component 'Catalog repository' {
+      description 'The one persistence interface, expressed in entries: entries and their sources, user fields, relations, saved views, provider metrics and snapshots, stacks and baselines, collection errors, and scan runs with lease acquisition, renewal, and completion. A project is the entry projection its filesystem source completes; no caller sees SQL or the attributes JSON layout.'
+      metadata { uid 'catalog.repository' fractalColor '#B59669' evidence ['src/lib/server/catalog/repository.ts'] }
+    }
+    sqlite = store 'ongoing.sqlite' {
+      description 'entries, entry_sources, fields, relations, saved_views, plus project_metrics, metric_snapshots, project_stacks re-keyed to entry_id, toolchain_releases, toolchain_baseline_status, collection_errors, scan_runs, website_pages. Default .data/ongoing.sqlite; Application Support in production.'
+      metadata { uid 'catalog.sqlite' fractalColor '#B59669' evidence ['src/lib/server/catalog/migrations/007_entries.sql', 'src/lib/server/catalog/migrations/008_rekey_metrics.sql', 'src/lib/server/catalog/migrations/001_initial.sql'] }
+    }
+    artifacts = store 'Immutable artifacts' {
+      description 'Canonical manifests and PNG posters stored beside SQLite by SHA-256, copied with catalog backups and retained for recovery.'
+      metadata { uid 'catalog.artifacts' fractalColor '#B59669' evidence ['src/lib/server/attachments.ts', 'deploy/aerie/remote-release.ts'] }
+    }
+  }
+
+  ops = subsystem 'Release & operations' {
+    description 'Private-host tooling for aerie.local: pinned Bun, launchd definitions, backups, and health-gated deploys.'
+    metadata { uid 'ops' fractalColor '#9FA8B3' evidence ['docs/deployment.md', 'deploy/aerie/release-config.ts'] }
+
+    scan_job = job 'Daily scan entry' {
+      description 'scripts/scan.ts forces HTTP transport through the CLI, requests the deployed scanner, and waits for its exact run ID. No local catalog fallback or source migrations; unavailable service, lease conflicts, and failed runs exit nonzero.'
+      metadata { uid 'ops.scan_job' fractalColor '#9FA8B3' evidence ['scripts/scan.ts', 'src/lib/host/scheduled-scan.ts', 'bin/ongoing.ts', 'docs/deployment.md'] }
+    }
+    build = component 'Immutable build publisher' {
+      description 'Stages adapter-node in a unique directory, serializes Vite builds, and atomically selects only successful bundles through the build symlink. Retains old artifacts for live processes; legacy directory installations require explicit adoption while stopped.'
+      metadata { uid 'ops.build' fractalColor '#9FA8B3' evidence ['src/lib/host/build.ts', 'svelte.config.js', 'src/lib/host/build.test.ts'] }
+    }
+    release = component 'Deploy & rollback' {
+      description 'Client validates the pinned runtime, then the remote worker fast-forwards main, quiesces both agents, backs up SQLite, builds, migrates once, reinstalls definitions, and waits for health on 7766.'
+      metadata { uid 'ops.release' fractalColor '#9FA8B3' evidence ['deploy/aerie/release-client.ts', 'deploy/aerie/remote-release.ts', 'deploy/aerie/rollback.ts'] }
+    }
+    smoke = component 'Smoke & migrate' {
+      description 'Authenticated LAN smoke against the configured origin, production-server tests, and the standalone migration runner.'
+      metadata { uid 'ops.smoke' fractalColor '#9FA8B3' evidence ['scripts/smoke.ts', 'deploy/aerie/production-smoke.ts', 'scripts/migrate.ts'] }
+    }
+    provision = component 'Runtime provisioning' {
+      description 'Installs the exact Bun version into an app-scoped mise data directory without touching the user runtime.'
+      metadata { uid 'ops.provision' fractalColor '#9FA8B3' evidence ['deploy/aerie/provision-runtime.sh', 'AGENTS.md'] }
+    }
+  }
+
+  external = subsystem 'Outside the process' {
+    description 'Tools, services, and hosts Ongoing depends on but does not own.'
+    metadata { uid 'external' fractalColor '#A69B8C' evidence ['docs/deployment.md'] }
+
+    repos = store 'Scan roots' {
+      description 'Git repositories under the configured roots (~/code in production), read to a bounded depth. Authoritative for what exists.'
+      metadata { uid 'external.repos' fractalColor '#A69B8C' evidence ['src/lib/server/config.ts', 'docs/adr/0003-scan-strategy.md'] }
+    }
+    tools = service 'git, cloc, td, gh' {
+      description 'Homebrew-resolved command-line tools the collectors spawn; deployment verifies all four before installing the scan agent.'
+      metadata { uid 'external.tools' fractalColor '#A69B8C' evidence ['docs/deployment.md', 'deploy/aerie/remote-release.ts'] }
+    }
+    td_serve = service 'td serve (HTTP)' {
+      description 'A project-local TD server, when running, answering /health, /v1/stats, and a stale-issue query.'
+      metadata { uid 'external.td_serve' fractalColor '#A69B8C' evidence ['src/lib/server/collectors/td.ts'] }
+    }
+    github = service 'GitHub API' {
+      description 'api.github.com GraphQL and REST, including repository traffic that needs push access.'
+      metadata { uid 'external.github' fractalColor '#A69B8C' evidence ['src/lib/server/github/client.ts'] }
+    }
+    endoflife = service 'endoflife.date' {
+      description 'Upstream release-cycle baseline for declared toolchains.'
+      metadata { uid 'external.endoflife' fractalColor '#A69B8C' evidence ['src/lib/server/releases/endoflife.ts'] }
+    }
+    launchd = service 'launchd agents' {
+      description 'com.marcusvorwaller.ongoing serves aerie.local:7766; com.marcusvorwaller.ongoing.scan fires once daily at 03:00 with no RunAtLoad.'
+      metadata { uid 'external.launchd' fractalColor '#A69B8C' evidence ['docs/deployment.md', 'deploy/aerie/release-config.ts'] }
+    }
+    skills = service 'project-standards skill' {
+      description 'The house rules every agent loads before working in a managed repo. Its language and tool-surface tables are generated from the radar export between markers; the prose around them stays hand-written.'
+      metadata { uid 'external.skills' fractalColor '#A69B8C' evidence ['scripts/render-project-standards.ts', 'docs/plans/implemented/tech-radar.md'] }
+    }
+    opentangle = service 'OpenTangle site' {
+      description 'The public website build that reads the live website export on its next deployment; private notes and metrics never reach it.'
+      metadata { uid 'external.opentangle' fractalColor '#A69B8C' evidence ['docs/website.md'] }
+    }
+    logo_sites = service 'Logo consumer sites' {
+      description 'Haplab, OpenTangle and product websites that pull the current logo set into their own deployment: logos.json, per-project document and poster, the viewer runtime and the embed helper. Visitors never reach the private service.'
+      metadata { uid 'external.logo_sites' fractalColor '#A69B8C' evidence ['docs/cli.md', 'src/lib/domain/logo-set.ts'] }
+    }
+  }
+
+  project_detail_redesign = subsystem 'Project overview' {
+    #current
+    description 'One project, two compositions: a shared presentation model and a focused history read feed section components composed compactly in the inventory panel and wide on /p/<slug>. Shipped 2026-09-14; the docs/mockups study is the reference, not the code.'
+    metadata { uid 'project-detail-redesign' fractalColor '#7FA8C9' evidence ['docs/plans/implemented/project-detail-redesign.md', 'src/lib/ui/project/ProjectPanel.svelte', 'src/lib/ui/project/ProjectFactsheet.svelte', 'DESIGN.md'] }
+    overview_data = component 'Shared overview model' {
+      #current
+      description 'Pure projectOverview: identity, the primary attention item with its action and evidence, disjoint activity rates, section summaries, inspector rows. selectPriority ranks classified reasons into five documented tiers; nothing invents a task or a score.'
+      metadata { uid 'project-detail-summary' fractalColor '#89A579' evidence ['src/lib/ui/overview.ts', 'src/lib/ui/overview.test.ts', 'src/lib/domain/priority.ts', 'src/lib/domain/priority.test.ts'] }
+    }
+    history = component 'Focused history read' {
+      #current
+      description 'One application function over listSnapshots behind GET /api/entries/:kind/:slug/history and ongoing history: bounded window, dated observations, availability and freshness stated separately. No new schema; contract in docs/cli.md.'
+      metadata { uid 'project-detail-history' fractalColor '#739886' evidence ['src/lib/domain/entry-history.ts', 'src/lib/server/catalog/history.ts', 'src/lib/server/catalog/history.test.ts', 'src/routes/api/entries/[kind]/[slug]/history/+server.ts', 'src/lib/server/api/local.ts', 'bin/ongoing.ts', 'tests/integration/history.test.ts', 'docs/cli.md'] }
+    }
+    charts = component 'Dated charts' {
+      #current
+      description 'Observations placed by capture date, gaps dashed, nulls breaking the line, a text summary for every state. Lazy reads per visible tab, cached by entry, metric, window and freshness; late responses ignored.'
+      metadata { uid 'project-detail-charts' fractalColor '#759EB5' evidence ['src/lib/ui/chart.ts', 'src/lib/ui/chart.test.ts', 'src/lib/ui/history-client.ts', 'src/lib/ui/history-client.test.ts', 'src/lib/ui/project/SignalHistory.svelte', 'src/lib/ui/project/DatedChart.svelte'] }
+    }
+    sections = component 'Reusable sections and inspector' {
+      #current
+      description 'src/lib/ui/project: identity, priority, signal tabs, Reach, four disclosures, the actions menu and the searchable field inspector. Both compositions render these components; every edit is an optimistic patch through Catalog.'
+      metadata { uid 'project-detail-sections' fractalColor '#759EB5' evidence ['src/lib/ui/project/ProjectPriority.svelte', 'src/lib/ui/project/ProjectSignals.svelte', 'src/lib/ui/project/FieldInspector.svelte', 'src/lib/ui/project/menu.ts', 'src/lib/ui/tokens.css', 'DESIGN.md'] }
+    }
+    panel = component 'Inventory panel' {
+      #current
+      description 'ProjectPanel stacks the sections in the shared Panel shell at 520px, falling back to 400px below 1366px. Disclosure, tab and pending-edit state are keyed by entry id.'
+      metadata { uid 'project-detail-panel' fractalColor '#759EB5' evidence ['src/lib/ui/project/ProjectPanel.svelte', 'src/lib/ui/Panel.svelte', 'src/routes/(inventory)/+page.svelte', 'tests/e2e/inventory.test.ts'] }
+    }
+    factsheet = component 'Project fact sheet' {
+      #current
+      description '/p/<slug>: identity beside priority, Activity/Codebase with Work and Repository left, Reach with Stack and Notes right, one column in DOM order below 860px. Returns to the inventory with its query, sort, columns, selection and scroll intact.'
+      metadata { uid 'project-detail-factsheet' fractalColor '#759EB5' evidence ['src/lib/ui/project/ProjectFactsheet.svelte', 'src/lib/ui/EntryPage.svelte', 'src/routes/(inventory)/p/[slug]/+page.svelte', 'src/lib/ui/scroll-memory.ts', 'src/lib/ui/safe-path.ts'] }
+    }
+  }
+
+  inventory = subsystem 'Software inventory' {
+    description 'The catalog as typed entries. The whole redesign is built: the entries store, the field registry, the query grammar, the entries API, the CLI over them, the keyboard-first browser shell that builds the same query string, the seams — provider manifests, one TOML configuration, the host adapter, the deployment and export profiles, and the CLI transport — and Phase 6: completeness from the registry, repositories with no local checkout, and an install that is two commands on a machine nobody has configured.'
+    metadata { uid 'inventory' fractalColor '#7FA8C9' evidence ['docs/plans/implemented/ongoing-inventory-redesign.md', 'src/lib/server/catalog/repository.ts'] }
+
+    entries = store 'entries, fields, relations' {
+      #current
+      description 'entries (kind, slug, tags, attributes JSON), entry_sources (which provider found it, and where — the filesystem provider writes the canonical path), fields (user-defined), relations (uses, provides, depends_on, part_of, with declared or detected evidence), saved_views. Projects and technologies are rows of one table.'
+      metadata { uid 'inventory.entries' fractalColor '#7FA8C9' evidence ['src/lib/server/catalog/migrations/007_entries.sql', 'src/lib/server/catalog/migrations/008_rekey_metrics.sql', 'docs/adr/0005-entry-model-and-field-registry.md'] }
+    }
+    registry = component 'Field registry & validation' {
+      #current
+      description 'Built-in fields declared in code, user fields as rows, provider fields projected from the metric tables as namespaced read-only keys. validateEntryPatch(registry, kind, patch) is the one pure validation path the API, the CLI, and the browser all run; an unknown key names the closest registered field.'
+      metadata { uid 'inventory.registry' fractalColor '#89A579' evidence ['src/lib/domain/fields.ts', 'src/lib/domain/provider-fields.ts', 'src/lib/domain/fields.test.ts'] }
+    }
+    query = component 'Query grammar' {
+      #current
+      description 'One pure parser and evaluator for filter clauses, multi-key sorts, and column sets. Parsing is total; unknown keys error against the registry with the nearest registered field. tag:, view:, tech: and kind: are field clauses like any other, because the read model derives path, is_missing, views, warnings, tech and stack.lag. The pre-Phase-2 view, filter, stack and search parameters translate into clauses through one exported table. A saved view is the same string stored, and views ship built in.'
+      metadata { uid 'inventory.query' fractalColor '#89A579' evidence ['src/lib/domain/query.ts', 'src/lib/domain/query.test.ts', 'src/lib/domain/view.ts', 'docs/adr/0006-one-query-grammar.md'] }
+    }
+    entries_api = component 'Entries API' {
+      #current
+      description 'GET /api/entries?q=&sort=&columns=&saved= is the one read endpoint; GET/PATCH/DELETE /api/entries/:kind/:slug, POST /api/entries, /api/fields, /api/relations and /api/views are the rest. One flat patch of field keys per write, validated by the registry; one query string per read, parsed by the grammar. /api/projects survives as the project projection the ongoing show and status commands read for their attention reasons; the browser no longer uses it.'
+      metadata { uid 'inventory.entries_api' fractalColor '#739886' evidence ['src/routes/api/entries/+server.ts', 'src/routes/api/fields/+server.ts', 'src/routes/api/relations/+server.ts', 'src/routes/api/views/+server.ts'] }
+    }
+    entry_cli = component 'Entry CLI verbs' {
+      #current
+      description 'list with a query string, --sort, --columns, --saved and --count; views and stacks over the same endpoint; get, set <entry> <field> <value> with the original decision flags as aliases; entry, field, tag, untag, link, unlink, view, providers, export, serve. The CLI imports the domain registry and the query parser directly, so a bad value or a bad clause is refused before the round trip, and every flag it shipped with survives as a clause alias.'
+      metadata { uid 'inventory.entry_cli' fractalColor '#82A6B6' evidence ['bin/ongoing.ts', 'docs/cli.md'] }
+    }
+    transport = adapter 'CLI transport' {
+      #current
+      description 'The CLI probes /api/health and speaks HTTP to whatever answers; when nothing does it links the core library into its own process and opens the catalog directly, so scan and list work with no daemon. Both transports dispatch to the same library functions rather than a second implementation, which is why the entries read and the prune rule moved out of their routes.'
+      metadata { uid 'inventory.transport' fractalColor '#82A6B6' evidence ['bin/ongoing.ts', 'src/lib/server/api/local.ts', 'src/lib/server/api/entries.ts'] }
+    }
+    providers = component 'Provider registry & manifests' {
+      #current
+      description 'Eight manifests — filesystem, git, td, stack, tech-signatures, loc, endoflife, github — each declaring the kinds it touches, the namespaced read-only fields and relation kinds it contributes, the commands and variables it requires, its schedule, and what it depends on. The field registry is built from them, so a disabled or unavailable provider registers nothing and the rules that read it go inert. Availability is one pure function over a probe of the machine; a provider that cannot run records why, and never fails a scan.'
+      metadata { uid 'inventory.providers' fractalColor '#9A91C4' evidence ['src/lib/domain/provider.ts', 'src/lib/domain/provider.test.ts', 'src/lib/server/providers/registry.ts', 'docs/adr/0007-provider-manifests-and-host-adapters.md'] }
+    }
+    config = component 'Configuration' {
+      #current
+      description 'One TOML file at ~/.config/ongoing/config.toml with [server], [scan], [providers] and per-provider tables, [host] and [export]; ONGOING_CONFIG points elsewhere. Environment variables stay overrides and secret carriers, so the installed LaunchAgents run unedited, and precedence is environment over file over default. A missing file means defaults; an unknown key is an error at start-up rather than a setting that quietly does nothing.'
+      metadata { uid 'inventory.config' fractalColor '#9A91C4' evidence ['src/lib/server/config-file.ts', 'src/lib/server/config.ts', 'src/lib/server/config-file.test.ts', 'docs/cli.md'] }
+    }
+    host = adapter 'Host adapter' {
+      #current
+      description 'serve, scan, restart, stop and logs behind one interface. launchd drives the two user LaunchAgents and is tested against captured launchctl output rather than the real agents; foreground supervises nothing and runs the application in the terminal, so an install without launchd is a configuration choice rather than a fork. ongoing serve --data-dir turns an empty directory into a catalog on first open.'
+      metadata { uid 'inventory.host' fractalColor '#9FA8B3' evidence ['src/lib/host/adapter.ts', 'src/lib/host/launchd.ts', 'src/lib/host/foreground.ts', 'src/lib/host/launchd.test.ts'] }
+    }
+    profile = component 'Deployment & export profiles' {
+      #current
+      description 'The aerie constants, the release client and worker, the provisioning script and both plist definitions live in deploy/aerie/, which the core never imports and a test enforces. Publishing is a profile too: opentangle is the shape OpenTangle reads and json is the generic one beside it. ongoing serve and ongoing scan are all a new machine needs.'
+      metadata { uid 'inventory.profile' fractalColor '#9FA8B3' evidence ['deploy/aerie/README.md', 'src/lib/domain/export.ts', 'src/routes/api/export/+server.ts', 'tests/foundation.test.ts'] }
+    }
+    shell = component 'Inventory shell' {
+      #current
+      description 'One route group loads the catalog for the rail, table, and detail panel. Filtering and sorting run locally through the shared query grammar. The filter help button or ? opens a native dialog with syntax, validated try-query examples, and searchable live registry fields; trying a query replaces the filter through the existing URL state. Keyboard controls cover navigation, filtering, sorting, columns, editing, favourite and hidden state.'
+      metadata { uid 'inventory.shell' fractalColor '#759EB5' evidence ['src/routes/(inventory)/+layout.svelte', 'src/routes/(inventory)/+page.svelte', 'src/routes/(inventory)/+layout.server.ts', 'src/lib/ui/QueryHelp.svelte', 'DESIGN.md'] }
+    }
+    url_state = component 'URL as the query' {
+      #current
+      description '?q=, ?sort=, ?columns= and ?saved= carry exactly the strings the CLI flags and the API parameters carry, built with formatQuery and formatSort; ?entry=kind/slug is the open row. listDefaultClauses is shared with ongoing list, so a URL and a CLI invocation return the same rows rather than mostly agreeing, and the filter box shows the effective query rather than keeping defaults as hidden state.'
+      metadata { uid 'inventory.url_state' fractalColor '#89A579' evidence ['src/lib/ui/query-state.ts', 'src/lib/ui/query-state.test.ts', 'src/lib/domain/query.ts'] }
+    }
+    optimistic = component 'Optimistic edits & undo' {
+      #current
+      description 'A patch is validated by validateEntryPatch and applied to a copy of the entry in the browser, the attention views are re-classified locally, and the server answer replaces the row — or the kept entry goes back with the API error shown inline. Undo is the inverse patch through the same endpoint, so it validates and re-classifies like any other edit.'
+      metadata { uid 'inventory.optimistic' fractalColor '#89A579' evidence ['src/lib/domain/optimistic.ts', 'src/lib/domain/optimistic.test.ts', 'src/lib/ui/catalog.svelte.ts'] }
+    }
+    palette = component 'Command palette' {
+      #current
+      description 'Cmd+K: fuzzy jump to any entry by name, slug or path, and run commands against whatever the list or the fact sheet is focused on — set intent, favourite, hide, reorder by manual rank, open in Terminal, open on GitHub — plus switch view and g p / g t / g r navigation. Every command prints its ongoing equivalent as its hint, which is what keeps the two surfaces honest.'
+      metadata { uid 'inventory.palette' fractalColor '#759EB5' evidence ['src/lib/ui/Palette.svelte', 'src/lib/ui/palette.ts', 'src/routes/(inventory)/+layout.svelte'] }
+    }
+    entry_page = component 'Entry fact sheet' {
+      #current
+      description '/p/<slug> and /t/<slug>. Since the project overview shipped, a project gets the composed fact sheet in the Project overview subsystem; every other kind — technologies today — keeps this generic body on its page and inside the detail panel: identity, the decision fields that have values behind one empty-fields toggle, every attention reason with its input, comparison and threshold, relations with their versions and rings, a commit-trend sparkline, and one panel per provider that left data. Every field is editable in place through the registry editor for its type.'
+      metadata { uid 'inventory.entry_page' fractalColor '#759EB5' evidence ['src/lib/ui/EntryPage.svelte', 'src/lib/ui/EntryFacts.svelte', 'src/lib/ui/facts.ts', 'src/routes/(inventory)/p/[slug]/+page.svelte'] }
+    }
+    providers_page = component 'Providers screen' {
+      #current
+      description 'What contributes to the catalog, whether it can run here, when it last did, and which fields it owns. It reads GET /api/providers when that route exists (Phase 5) and falls back to what the field registry already knows, rendering availability and last run as unknown rather than guessing them.'
+      metadata { uid 'inventory.providers_page' fractalColor '#759EB5' evidence ['src/routes/(inventory)/providers/+page.svelte', 'src/lib/ui/providers.ts'] }
+    }
+    completeness = component 'Completeness' {
+      #current
+      description 'A count, not a concept: entryCompleteness divides the required fields an entry carries by the required fields its kind declares and projects the result as `complete`, 0 to 100. A field marked required — built in, or added by ongoing field add --required — starts counting the moment it is registered, so `ongoing list \'complete<100\'` is an ordinary query and `incomplete` is an ordinary saved view. A project marked invest that is not complete is an attention reason naming the missing keys. Pure, and reading only stored values, so the read model, the project projection and the browser after an optimistic edit all get the same number.'
+      metadata { uid 'inventory.completeness' fractalColor '#89A579' evidence ['src/lib/domain/completeness.ts', 'src/lib/domain/completeness.test.ts', 'src/lib/domain/provider-fields.ts', 'src/lib/domain/attention.ts'] }
+    }
+    remote_discovery = component 'Remote repository discovery' {
+      #current
+      description 'An entry is a project because a provider found it, not because it is on this disk. With [providers.github] discover naming owners — empty by default — a scan catalogues the repositories those owners have that no local checkout claims: an entry with a github source, a locator of owner/name, and no filesystem source, so the read model gives it no path and no local metrics. What this provider creates it owns: a repository since cloned locally, or gone, loses its entry on the next pass unless somebody wrote a note or a tag on it, and a pass whose listing failed removes nothing.'
+      metadata { uid 'inventory.remote_discovery' fractalColor '#9A91C4' evidence ['src/lib/server/github/discovery.ts', 'src/lib/server/collectors/github-discovery.ts', 'tests/integration/remote-discovery.test.ts'] }
+    }
+    install = component 'Install (init and serve)' {
+      #current
+      description 'ongoing init writes one commented TOML file from a pure template, makes the data directory, and opens the catalog once so the migrations run; it refuses to overwrite a configuration file that already exists. ongoing serve then runs the application in the terminal on the port that file names. Those two commands plus a scan are the whole installation on a machine with no service manager, no deployment profile, and nobody else\'s configuration — which is what tests/integration/fresh-install.test.ts executes against a temporary HOME.'
+      metadata { uid 'inventory.install' fractalColor '#9FA8B3' evidence ['bin/ongoing.ts', 'src/lib/server/config-file.ts', 'tests/integration/fresh-install.test.ts', 'docs/deployment.md'] }
+    }
+    ui_kit = component 'Design system' {
+      #current
+      description 'src/lib/ui: Table, one editor per registered field type, Palette, Panel, Rail, Badge, Sparkline and roc icons over dark-first LCH tokens on a 4px grid, with no per-component font size or colour literal anywhere; the project overview added the type, tracking, rule, panel-width, fact-sheet and chart tokens and consumes nothing else. Table columns and fact-sheet sections are driven by field definitions, so a field added by ongoing field add renders and edits with no frontend change. The house style and its deliberate drift from the Linear patterns are written down in DESIGN.md. Replaced dashboard.css, the catalog ticker, the header flyout, the project drawer, and drag reorder.'
+      metadata { uid 'inventory.ui_kit' fractalColor '#759EB5' evidence ['src/lib/ui/tokens.css', 'src/lib/ui/Table.svelte', 'src/lib/ui/FieldEditor.svelte', 'DESIGN.md', 'docs/adr/0008-frontend-design-system.md'] }
+    }
+  }
+
+  radar = subsystem 'Tech radar' {
+    description 'Phases 3 and 4 of the inventory redesign, built: technologies as a second entry kind with rings, uses relations that are detected or declared, radar attention reasons, generated project-standards tables, and the radar page that edits a ring on the chip.'
+    metadata { uid 'radar' fractalColor '#C4A0B8' evidence ['docs/plans/implemented/tech-radar.md', 'docs/plans/implemented/ongoing-inventory-redesign.md'] }
+
+    model = component 'Radar model & signatures' {
+      #current
+      description 'The seed list Ongoing ships, the signature table that is the whole detector, the matchers over one manifest, the ring vocabulary and staleness rule, and the deterministic export. Pure data and pure rules; a signature exists only for a technology already in the catalog.'
+      metadata { uid 'radar.model' fractalColor '#89A579' evidence ['src/lib/domain/technology.ts', 'src/lib/domain/technology.test.ts'] }
+    }
+    signatures = component 'tech-signatures provider' {
+      #current
+      description 'Matches manifest dependencies against the signature list inside the stack collector parse pass — package.json, go.mod, Gemfile, Cargo.toml, composer.json, plus marker files — and takes languages from the toolchains the same pass collected. Detected uses relations are rewritten whole every scan and never hand-edited; declared edges are untouched.'
+      metadata { uid 'radar.signatures' fractalColor '#C4A0B8' evidence ['src/lib/server/collectors/stack.ts', 'src/lib/server/catalog/repository.ts', 'src/lib/server/scanning/scanner.ts'] }
+    }
+    tech_cli = component 'ongoing tech verbs' {
+      #current
+      description 'tech list, show, add, set, export, and an idempotent seed that writes the shipped technologies through the API rather than a migration. Every flag is a clause against the same query model, so tech list --ring hot is list kind:technology ring:hot in ring order.'
+      metadata { uid 'radar.tech_cli' fractalColor '#C4A0B8' evidence ['bin/ongoing.ts', 'docs/cli.md'] }
+    }
+    generator = component 'project-standards generator' {
+      #current
+      description 'Renders ongoing tech export into the skill\'s language and tool-surface tables between markers, leaving the prose around them alone. --check fails when the skill has drifted from the catalog.'
+      metadata { uid 'radar.generator' fractalColor '#C4A0B8' evidence ['scripts/render-project-standards.ts'] }
+    }
+    page = component 'Radar page' {
+      #current
+      description 'Four rings as rows, each technology a chip carrying how many projects use it and whether its ring is stale, clicking through to the inventory filtered by tech:<slug>. The ring is an enum editor on the chip itself, which is PATCH /api/entries/technology/<slug> — the same write ongoing tech set makes.'
+      metadata { uid 'radar.page' fractalColor '#C4A0B8' evidence ['src/routes/(inventory)/radar/+page.svelte', 'src/lib/ui/views.ts'] }
+    }
+  }
+
+  // People and clients
+  user .calls cli.read_cmds 'Runs ongoing from a shell' { metadata { uid 'user-cli' } }
+
+  // CLI is a pure API client
+  cli.read_cmds .calls cli.client 'Requests page models' { metadata { uid 'cli-read-client' } }
+  cli.edit_cmds .calls cli.client 'Sends mutations' { metadata { uid 'cli-edit-client' } }
+  cli.edit_cmds .calls service.attachments_api 'attachment set, get and export by exact project ID' { metadata { uid 'cli-attachments-api' } }
+  cli.scan_cmd .calls cli.client 'Starts and polls scans' { metadata { uid 'cli-scan-client' } }
+  cli.client .calls service.projects_api 'GET /api/projects, PATCH /api/projects/:id, ...' { metadata { uid 'cli-projects-api' } }
+  cli.client .calls service.scan_api 'POST /api/scan' { metadata { uid 'cli-scan-api' } }
+  cli.client .calls service.website_api 'website copy, pages, export' { metadata { uid 'cli-website-api' } }
+  cli.service_cmds .calls external.launchd 'bootout / bootstrap the web and scan agents' { metadata { uid 'cli-launchd' } }
+
+  // Browser is the same kind of client
+  web.login .calls service.security 'Verifies the secret and sets the cookie' { metadata { uid 'login-security' } }
+
+  // Request path
+  service.edge .calls service.gate 'Forwards bounded requests over loopback' { metadata { uid 'edge-gate' } }
+  service.gate .calls service.security 'Validates the session cookie' { metadata { uid 'gate-security' } }
+  service.gate .calls scanning.scheduler 'Arms the development scheduler once' { metadata { uid 'gate-scheduler' } }
+  service.gate .calls service.projects_api 'Routes private requests' { metadata { uid 'gate-projects' } }
+  service.gate .calls service.scan_api 'Routes scan requests' { metadata { uid 'gate-scan' } }
+  service.gate .calls service.website_api 'Routes website requests' { metadata { uid 'gate-website' } }
+
+  // API to core
+  service.projects_api .calls domain.readmodel 'Builds the page model' { metadata { uid 'projects-readmodel' } }
+  service.projects_api .calls domain.project 'Validates notes and decisions' { metadata { uid 'projects-domain' } }
+  service.projects_api .writes catalog.repository 'Flags, notes, decisions, order, forget' { metadata { uid 'projects-repo' } }
+  service.attachments_api .calls service.rich_adapters 'Validates the registered document contract' { metadata { uid 'attachments-adapters' } }
+  service.attachments_api .writes catalog.repository 'Selects one compact field reference under revision compare-and-set' { metadata { uid 'attachments-repo' } }
+  service.attachments_api .writes catalog.artifacts 'Writes canonical manifest and poster before selection' { metadata { uid 'attachments-artifacts' } }
+  service.scan_api .calls scanning.scanner 'Starts a manual or project run' { metadata { uid 'scanapi-scanner' } }
+  service.scan_api .reads scanning.progress 'Replays and subscribes to run events' { metadata { uid 'scanapi-progress' } }
+  service.website_api .calls domain.website 'Validates copy and exports eligible entries' { metadata { uid 'website-domain' } }
+  service.website_api .writes catalog.repository 'Website copy and standalone pages' { metadata { uid 'website-repo' } }
+  service.runtime .calls catalog.database 'Opens and migrates the catalog' { metadata { uid 'runtime-database' } }
+  service.runtime .calls scanning.scanner 'Re-enriches a restored project' { metadata { uid 'runtime-enrich' } }
+
+  // Domain reads
+  domain.readmodel .reads catalog.repository 'Projects, metrics, snapshots, stacks, errors' { metadata { uid 'readmodel-repo' } }
+  domain.readmodel .calls domain.attention 'Classifies every project' { metadata { uid 'readmodel-attention' } }
+  domain.readmodel .calls domain.stack 'Resolves declared versions against baselines' { metadata { uid 'readmodel-stack' } }
+  domain.readmodel .calls domain.project 'Sorts and applies the query' { metadata { uid 'readmodel-project' } }
+  domain.website .reads domain.contracts 'Repository visibility from hosting metrics' { metadata { uid 'website-contracts' } }
+  domain.attention .reads domain.contracts 'Metric shapes and availability states' { metadata { uid 'attention-contracts' } }
+
+  // Scanner pipeline
+  scanning.scheduler .calls scanning.scanner 'startup and scheduled runs' { metadata { uid 'scheduler-scanner' } }
+  scanning.wiring .supplies scanning.scanner 'collectHosting and refreshReleaseBaselines' { metadata { uid 'wiring-scanner' } }
+  scanning.scanner .writes catalog.repository 'Lease, metrics, snapshots, errors, run progress' { metadata { uid 'scanner-repo' } }
+  scanning.scanner .writes scanning.progress 'Publishes run events' { metadata { uid 'scanner-progress' } }
+  scanning.scanner .calls scanning.discover 'Discover and reconcile roots' { metadata { uid 'scanner-discover' } }
+  scanning.scanner .calls scanning.git 'Per project, every policy' { metadata { uid 'scanner-git' } }
+  scanning.scanner .calls scanning.td 'Per project, every policy' { metadata { uid 'scanner-td' } }
+  scanning.scanner .calls scanning.stack 'Per project, every policy' { metadata { uid 'scanner-stack' } }
+  scanning.scanner .calls scanning.loc 'Only for changed and full policies' { metadata { uid 'scanner-loc' } }
+  scanning.scanner .calls scanning.baseline 'After per-project collection' { metadata { uid 'scanner-baseline' } }
+  scanning.scanner .calls scanning.github 'Hosting and traffic, once per run' { metadata { uid 'scanner-github' } }
+
+  // Collectors
+  scanning.discover .reads external.repos 'Walks roots and stats missing paths' { metadata { uid 'discover-repos' } }
+  scanning.discover .writes catalog.repository 'Upsert, mark missing, forget' { metadata { uid 'discover-repo' } }
+  scanning.discover .calls scanning.process 'git rev-parse --show-toplevel' { metadata { uid 'discover-process' } }
+  scanning.git .calls scanning.process 'git log, status, ls-files' { metadata { uid 'git-process' } }
+  scanning.loc .calls scanning.git 'Tracked worktree fingerprint' { metadata { uid 'loc-git' } }
+  scanning.loc .calls scanning.process 'cloc --json --vcs git' { metadata { uid 'loc-process' } }
+  scanning.td .calls external.td_serve 'HTTP when .todos/serve-port is live' { metadata { uid 'td-http' } }
+  scanning.td .calls scanning.process 'td --json list --all as fallback' { metadata { uid 'td-process' } }
+  scanning.stack .reads external.repos 'Root manifests' { metadata { uid 'stack-repos' } }
+  scanning.github .calls scanning.process 'git remote get-url origin' { metadata { uid 'github-process' } }
+  scanning.github .calls scanning.github_provider 'availability, collect, collectTraffic' { metadata { uid 'github-provider' } }
+  scanning.github .writes catalog.repository 'Hosting metrics, snapshots, availability' { metadata { uid 'github-repo' } }
+  scanning.process .runs external.tools 'Spawned with timeouts and output caps' { metadata { uid 'process-tools' } }
+
+  // Providers
+  scanning.github_provider .calls scanning.github_client 'GraphQL and REST requests' { metadata { uid 'provider-client' } }
+  scanning.github_client .calls external.github 'api.github.com' { metadata { uid 'client-github' } }
+  scanning.github_client .calls scanning.process 'gh auth token when no env token' { metadata { uid 'client-gh' } }
+  scanning.baseline .calls scanning.endoflife 'Fetch cycles per declared toolchain' { metadata { uid 'baseline-endoflife' } }
+  scanning.baseline .writes catalog.repository 'toolchain_releases and baseline status' { metadata { uid 'baseline-repo' } }
+  scanning.endoflife .calls external.endoflife 'GET /api/v1/products/:id' { metadata { uid 'endoflife-api' } }
+
+  // Catalog
+  catalog.repository .calls catalog.database 'Serialized writes and queries' { metadata { uid 'repo-database' } }
+  catalog.database .writes catalog.sqlite 'WAL journal, migrations' { metadata { uid 'database-sqlite' } }
+
+  // Operations
+  external.launchd .runs service.edge 'Web agent on 7766' { metadata { uid 'launchd-web' } }
+  ops.build .supplies service.edge 'Immutable bundle pinned until restart' { metadata { uid 'build-edge' } }
+  inventory.host .calls ops.build 'Build before restart when requested' { metadata { uid 'host-build' } }
+  external.launchd .schedules ops.scan_job 'Scan agent at 03:00 local' { metadata { uid 'launchd-scan' } }
+  ops.scan_job .calls service.scan_api 'Request a deployed scan and poll its exact run ID' { metadata { uid 'scanjob-scanner' } }
+  ops.release .calls external.launchd 'Quiesce, reinstall definitions, start' { metadata { uid 'release-launchd' } }
+  ops.release .writes catalog.sqlite 'Consistent backup, migrate once, restore on rollback' { metadata { uid 'release-sqlite' } }
+  ops.release .writes catalog.artifacts 'Matched backup and restore beside SQLite' { metadata { uid 'release-artifacts' } }
+  ops.release .calls ops.provision 'Validates the pinned Bun before deploying' { metadata { uid 'release-provision' } }
+  ops.smoke .calls service.edge 'Health and authenticated LAN smoke' { metadata { uid 'smoke-edge' } }
+  ops.smoke .calls catalog.database 'Standalone migration' { metadata { uid 'smoke-migrate' } }
+
+  // Website consumer
+  external.opentangle .calls service.website_api 'GET /api/website on deployment' { metadata { uid 'opentangle-export' } }
+  external.logo_sites .calls cli.edit_cmds 'ongoing logos export --output DIR <slug>... on each pull' { metadata { uid 'logo-sites-pull' } }
+  cli.edit_cmds .calls service.attachments_api 'GET /api/logos lists every current logo; artifacts fetched per project' { metadata { uid 'cli-logos-api' } }
+
+  // The software inventory: Phases 1 through 5
+  user .calls inventory.shell 'Browses, filters, and edits in the table' { metadata { uid 'user-inventory' } }
+  user .calls inventory.entry_cli 'Runs the same verbs and the same queries from a shell' { metadata { uid 'user-entry-cli' } }
+  inventory.shell .reads inventory.entries_api 'The whole catalog once per load, then PATCH per edit' { metadata { uid 'shell-api' } }
+  inventory.shell .calls inventory.ui_kit 'Table, cell editors, rail, panel, badges' { metadata { uid 'shell-uikit' } }
+  inventory.shell .calls inventory.query 'Filters and sorts the loaded rows in the browser, and validates as you type' { metadata { uid 'shell-query' } }
+  inventory.palette .calls inventory.entries_api 'Jump to an entry, run a command against it' { metadata { uid 'palette-api' } }
+  inventory.entry_page .calls inventory.entries_api 'PATCH one field in place' { metadata { uid 'entrypage-api' } }
+  inventory.entry_page .calls domain.attention 'Shows every reason with its input, comparison, and threshold' { metadata { uid 'entrypage-attention' } }
+  inventory.shell .calls inventory.url_state 'Reads and writes the query, the sort, the columns, and the open row' { metadata { uid 'shell-url' } }
+  inventory.url_state .calls inventory.query 'formatQuery, formatSort, and the list defaults the CLI shares' { metadata { uid 'url-query' } }
+  inventory.shell .calls inventory.optimistic 'Applies the patch locally before the server answers' { metadata { uid 'shell-optimistic' } }
+  inventory.optimistic .calls inventory.registry 'validateEntryPatch, the same path the API and the CLI run' { metadata { uid 'optimistic-registry' } }
+  inventory.optimistic .calls domain.attention 'Re-classifies the entry so a decision moves a row immediately' { metadata { uid 'optimistic-attention' } }
+  inventory.optimistic .calls inventory.entries_api 'PATCH, and the inverse patch for undo' { metadata { uid 'optimistic-api' } }
+  inventory.shell .calls service.scan_api 'POST /api/scan from the rail; ongoing scan --wait follows a run' { metadata { uid 'shell-scan' } }
+  inventory.providers_page .reads inventory.providers 'GET /api/providers: availability, last run, and what each one contributes' { metadata { uid 'providerspage-providers' } }
+  inventory.providers_page .reads inventory.registry 'Which providers own which fields' { metadata { uid 'providerspage-registry' } }
+  radar.page .calls inventory.entries_api 'Lists technologies, PATCHes a ring on a chip' { metadata { uid 'radarpage-api' } }
+  radar.page .calls inventory.shell 'A chip links through to the inventory filtered by tech:<slug>' { metadata { uid 'radarpage-shell' } }
+  inventory.entry_cli .calls inventory.entries_api 'Over HTTP, or the core in-process when no service runs' { metadata { uid 'entrycli-api' } }
+  inventory.entry_cli .calls inventory.query 'Builds the query from flags and counts saved views without a round trip' { metadata { uid 'entrycli-query' } }
+  inventory.entry_cli .calls inventory.host 'serve, scan, restart, stop, logs' { metadata { uid 'entrycli-host' } }
+  inventory.entries_api .calls inventory.registry 'validateEntryPatch before any write' { metadata { uid 'api-registry' } }
+  inventory.entries_api .calls inventory.query 'Parses and evaluates q, sort, columns, saved' { metadata { uid 'api-query' } }
+  inventory.entries_api .calls domain.readmodel 'Merges stored attributes and projected provider metrics into one field map' { metadata { uid 'api-readmodel' } }
+  inventory.entries_api .writes catalog.repository 'Entries, fields, relations, saved views' { metadata { uid 'api-repo' } }
+  inventory.query .reads inventory.registry 'Resolves and type-checks every field key' { metadata { uid 'query-registry' } }
+  inventory.registry .reads inventory.entries 'User-defined field rows' { metadata { uid 'registry-entries' } }
+  service.projects_api .reads inventory.entries 'The project projection of the same entries, tags and attributes included' { metadata { uid 'projects-entries' } }
+  inventory.providers .supplies inventory.registry 'Namespaced read-only field and relation definitions, only for providers that can run' { metadata { uid 'providers-registry' } }
+  inventory.providers .supplies scanning.scanner 'The active provider set in dependency order, replacing the fixed sequence' { metadata { uid 'providers-scanner' } }
+  inventory.config .supplies inventory.providers 'Which providers are on, and their settings' { metadata { uid 'config-providers' } }
+  inventory.config .supplies inventory.host 'Which host implementation serves and schedules' { metadata { uid 'config-host' } }
+  inventory.host .calls external.launchd 'The launchd implementation; foreground is the second one' { metadata { uid 'host-launchd' } }
+  inventory.profile .calls inventory.host 'aerie deploy and rollback through the adapter' { metadata { uid 'profile-host' } }
+  inventory.profile .calls service.website_api 'The opentangle export profile' { metadata { uid 'profile-export' } }
+  catalog.repository .writes inventory.entries 'The one persistence interface; no caller sees SQL or the JSON layout' { metadata { uid 'repo-entries' } }
+
+  // Phase 6: completeness, repositories with no checkout, and installing it somewhere else
+  inventory.completeness .reads inventory.registry 'Which fields this kind declares required' { metadata { uid 'completeness-registry' } }
+  domain.readmodel .calls inventory.completeness 'Projects `complete` onto every entry it builds' { metadata { uid 'readmodel-completeness' } }
+  inventory.optimistic .calls inventory.completeness 'Recomputes the score in the browser after an edit' { metadata { uid 'optimistic-completeness' } }
+  inventory.completeness .supplies domain.attention 'The gap behind the incomplete-invest reason' { metadata { uid 'completeness-attention' } }
+  scanning.scanner .calls inventory.remote_discovery 'Before hosting enrichment, when an owner is configured' { metadata { uid 'scanner-remote-discovery' } }
+  inventory.remote_discovery .calls scanning.github_client 'Lists an owner\'s repositories over GraphQL' { metadata { uid 'remote-discovery-client' } }
+  inventory.remote_discovery .writes inventory.entries 'Entries with a github source and no filesystem source' { metadata { uid 'remote-discovery-entries' } }
+  inventory.config .supplies inventory.remote_discovery 'The owners to catalogue, and whether forks and archives count' { metadata { uid 'config-remote-discovery' } }
+  scanning.github .reads inventory.remote_discovery 'Enriches remote-only entries from the source row rather than a working copy' { metadata { uid 'github-remote-entries' } }
+  user .calls inventory.install 'ongoing init, then scan, then serve' { metadata { uid 'user-install' } }
+  inventory.install .writes inventory.config 'The commented configuration file a first install starts from' { metadata { uid 'install-config' } }
+  inventory.install .calls inventory.host 'serve, through the foreground adapter it writes' { metadata { uid 'install-host' } }
+  inventory.entry_cli .calls inventory.install 'init and serve are CLI verbs like any other' { metadata { uid 'entrycli-install' } }
+
+  // The tech radar, Phase 3 of the inventory redesign
+  radar.signatures .calls scanning.stack 'Reads manifest dependencies in the same parse pass as the toolchains' { metadata { uid 'radar-stack' } }
+  radar.signatures .writes inventory.entries 'Rewrites detected uses relations every scan' { metadata { uid 'radar-detected' } }
+  radar.signatures .reads radar.model 'Matches against the signature table' { metadata { uid 'radar-signature-table' } }
+  radar.signatures .supplies inventory.providers 'Declares its fields and the uses relation kind' { metadata { uid 'radar-manifest' } }
+  radar.tech_cli .writes inventory.entries 'Rings, notes, seeded technologies, declared relations' { metadata { uid 'radar-cli-tables' } }
+  radar.tech_cli .calls inventory.entries_api 'Through the same HTTP contract as everything else' { metadata { uid 'radar-cli-client' } }
+  radar.model .supplies domain.attention 'Ring and version behind the out-technology and stale-ring reasons' { metadata { uid 'radar-attention' } }
+  radar.generator .calls radar.tech_cli 'Reads the deterministic tech export' { metadata { uid 'radar-generator-export' } }
+  radar.generator .writes external.skills 'Regenerates the language and tool tables between markers' { metadata { uid 'radar-generator-skill' } }
+  radar.page .reads inventory.entries 'Rings and project counts' { metadata { uid 'radar-page-tables' } }
+  radar.page .calls inventory.ui_kit 'Chips and badges from the shared design system' { metadata { uid 'radar-page-uikit' } }
+
+  // The project overview: one model, one history read, two compositions
+  project_detail_redesign.overview_data .supplies project_detail_redesign.sections 'One reading model: summaries, actions, evidence, inspector rows' { metadata { uid 'project-detail-summary-sections' } }
+  project_detail_redesign.overview_data .reads domain.attention 'Ranks the reasons already classified on the entry; never re-classifies' { metadata { uid 'project-detail-summary-attention' } }
+  project_detail_redesign.overview_data .reads inventory.registry 'Labels, descriptions and ownership for every field the inspector lists' { metadata { uid 'project-detail-summary-registry' } }
+  project_detail_redesign.sections .supplies project_detail_redesign.panel 'Compact composition' { metadata { uid 'project-detail-sections-panel' } }
+  project_detail_redesign.sections .supplies project_detail_redesign.factsheet 'Spacious composition' { metadata { uid 'project-detail-sections-factsheet' } }
+  project_detail_redesign.charts .supplies project_detail_redesign.sections 'The Reach and Codebase chart slots' { metadata { uid 'project-detail-charts-sections' } }
+  project_detail_redesign.charts .calls project_detail_redesign.history 'Lazily, for the visible tab; cached by entry, metric, window and collector freshness' { metadata { uid 'project-detail-charts-history' } }
+  project_detail_redesign.history .reads catalog.repository 'listSnapshots for one entry and metric; no new schema' { metadata { uid 'project-detail-history-repo' } }
+  inventory.entries_api .calls project_detail_redesign.history 'GET /api/entries/:kind/:slug/history?metric=&days=' { metadata { uid 'project-detail-api-history' } }
+  inventory.entry_cli .calls project_detail_redesign.history 'ongoing history, over HTTP or in-process through the same transport' { metadata { uid 'project-detail-cli-history' } }
+  project_detail_redesign.sections .calls inventory.optimistic 'Next action, notes and inspector edits are the same validated patch, rollback and undo' { metadata { uid 'project-detail-sections-optimistic' } }
+  project_detail_redesign.sections .calls inventory.ui_kit 'Tokens, badges, icons and the typed field editors' { metadata { uid 'project-detail-sections-uikit' } }
+  inventory.shell .calls project_detail_redesign.panel 'Enter on a project row; a technology row keeps the generic panel' { metadata { uid 'project-detail-shell-panel' } }
+  inventory.entry_page .calls project_detail_redesign.factsheet '/p/<slug> composes the sheet; /t/<slug> keeps EntryFacts' { metadata { uid 'project-detail-entrypage-factsheet' } }
+  project_detail_redesign.factsheet .calls inventory.url_state 'Returns to the inventory with query, sort, columns, selected entry and scroll intact' { metadata { uid 'project-detail-factsheet-url' } }
+}
+
+views {
+  view index {
+    include *
+  }
+
+}

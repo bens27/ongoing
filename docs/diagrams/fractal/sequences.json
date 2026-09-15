@@ -1,0 +1,965 @@
+{
+  "version": 1,
+  "journeys": [
+    {
+      "id": "manual-scan",
+      "title": "ongoing scan --wait",
+      "description": "A shell-started full-catalog scan: lease, discovery, per-project collectors, then GitHub, while the CLI polls the catalog until the run settles.",
+      "status": "current",
+      "provenance": "Authored 2026-09-11 from bin/ongoing.ts (commandScan, waitForScan), src/routes/api/scan/+server.ts, src/lib/server/scanning/scanner.ts, and src/lib/server/collectors/discover.ts. A successful path; collector failures are recorded as warnings and are not shown.",
+      "participants": [
+        {
+          "id": "shell",
+          "title": "Shell or agent",
+          "color": "#759EB5"
+        },
+        {
+          "id": "cli",
+          "element": "cli.scan_cmd",
+          "title": "ongoing scan"
+        },
+        {
+          "id": "api",
+          "element": "service.scan_api",
+          "title": "Scan API"
+        },
+        {
+          "id": "scanner",
+          "element": "scanning.scanner",
+          "title": "Scanner"
+        },
+        {
+          "id": "repo",
+          "element": "catalog.repository",
+          "title": "Repository"
+        },
+        {
+          "id": "discover",
+          "element": "scanning.discover",
+          "title": "Discovery"
+        },
+        {
+          "id": "local",
+          "element": "scanning.git",
+          "title": "git / td / stack / cloc"
+        },
+        {
+          "id": "github",
+          "element": "scanning.github",
+          "title": "GitHub enrichment"
+        }
+      ],
+      "groups": [
+        {
+          "id": "process",
+          "title": "Web process",
+          "participants": ["api", "scanner", "repo", "discover", "local", "github"]
+        }
+      ],
+      "steps": [
+        {
+          "type": "phase",
+          "id": "start",
+          "title": "1. Acquire the lease",
+          "description": "A second concurrent scan is refused with 409 rather than queued.",
+          "steps": [
+            {
+              "type": "message",
+              "id": "invoke",
+              "from": "shell",
+              "to": "cli",
+              "title": "ongoing scan --wait",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "post",
+              "from": "cli",
+              "to": "api",
+              "title": "POST /api/scan {}",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "start-run",
+              "from": "api",
+              "to": "scanner",
+              "title": "start({ reason: manual })",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "lease",
+              "from": "scanner",
+              "to": "repo",
+              "title": "tryCreateScanRun with lease owner",
+              "kind": "call",
+              "description": "Fails if another run is running and its heartbeat is not stale."
+            },
+            {
+              "type": "message",
+              "id": "accepted",
+              "from": "api",
+              "to": "cli",
+              "title": "202 { runId, status: running }",
+              "kind": "return"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "discovery",
+          "title": "2. Discover and reconcile",
+          "steps": [
+            {
+              "type": "message",
+              "id": "walk",
+              "from": "scanner",
+              "to": "discover",
+              "title": "discoverAndReconcile(roots, depth, globs)",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "upsert",
+              "from": "discover",
+              "to": "repo",
+              "title": "upsertDiscovered per repository",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "missing",
+              "from": "discover",
+              "to": "repo",
+              "title": "markUnseenMissing; forget confirmed-gone after grace",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "discovered",
+              "from": "discover",
+              "to": "scanner",
+              "title": "projects, enrichmentProjects (hidden excluded)",
+              "kind": "return"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "collect",
+          "title": "3. Collect per project",
+          "description": "Runs under gitConcurrency; cloc additionally under clocConcurrency and only when the tracked-worktree fingerprint changed (policy: changed).",
+          "steps": [
+            {
+              "type": "message",
+              "id": "heartbeat",
+              "from": "scanner",
+              "to": "repo",
+              "title": "renewScanLease every 10 s",
+              "kind": "async"
+            },
+            {
+              "type": "message",
+              "id": "git",
+              "from": "scanner",
+              "to": "local",
+              "title": "collectGitMetrics",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "td",
+              "from": "scanner",
+              "to": "local",
+              "title": "collectTdMetrics (HTTP, else CLI)",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "stack",
+              "from": "scanner",
+              "to": "local",
+              "title": "collectStackDeclarations",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "loc",
+              "from": "scanner",
+              "to": "local",
+              "title": "collectLocMetrics if fingerprint changed",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "metrics",
+              "from": "scanner",
+              "to": "repo",
+              "title": "updateMetrics, saveSnapshot, resolve or record collection errors",
+              "kind": "call"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "remote",
+          "title": "4. Baselines and GitHub, once per run",
+          "steps": [
+            {
+              "type": "message",
+              "id": "baseline",
+              "from": "scanner",
+              "to": "repo",
+              "title": "refreshReleaseBaselines for declared toolchains",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "hosting",
+              "from": "scanner",
+              "to": "github",
+              "title": "collectGitHubEnrichment(projects, force: false)",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "hosting-write",
+              "from": "github",
+              "to": "repo",
+              "title": "hosting and traffic metrics, star and traffic snapshots",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "finish",
+              "from": "scanner",
+              "to": "repo",
+              "title": "finishScanRun(completed, counts)",
+              "kind": "call"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "wait",
+          "title": "5. The CLI polls until the run settles",
+          "steps": [
+            {
+              "type": "message",
+              "id": "poll",
+              "from": "cli",
+              "to": "api",
+              "title": "GET /api/scan?runId=... every 2 s",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "settled",
+              "from": "api",
+              "to": "cli",
+              "title": "scan.status: completed",
+              "kind": "return"
+            },
+            {
+              "type": "message",
+              "id": "report",
+              "from": "cli",
+              "to": "shell",
+              "title": "discovered \u00b7 updated \u00b7 errors (exit 1 unless completed)",
+              "kind": "return"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "daily-refresh",
+      "title": "The 03:00 calendar scan",
+      "description": "launchd requests a scan from the running service. All collection and database access use the deployed build; an unavailable service fails without opening the catalog.",
+      "status": "current",
+      "provenance": "Verified from scripts/scan.ts, src/lib/host/scheduled-scan.ts, bin/ongoing.ts, src/routes/api/scan/+server.ts, and the production launchd profile.",
+      "participants": [
+        {
+          "id": "launchd",
+          "element": "external.launchd",
+          "title": "launchd"
+        },
+        {
+          "id": "job",
+          "element": "ops.scan_job",
+          "title": "scripts/scan.ts"
+        },
+        {
+          "id": "web",
+          "element": "service.runtime",
+          "title": "Web process"
+        },
+        {
+          "id": "wiring",
+          "element": "scanning.wiring",
+          "title": "Collector wiring"
+        },
+        {
+          "id": "scanner",
+          "element": "scanning.scanner",
+          "title": "Scanner"
+        },
+        {
+          "id": "sqlite",
+          "element": "catalog.sqlite",
+          "title": "ongoing.sqlite"
+        }
+      ],
+      "groups": [
+        {
+          "id": "scan-process",
+          "title": "Deployed web process",
+          "participants": ["web", "wiring", "scanner"]
+        }
+      ],
+      "steps": [
+        {
+          "type": "phase",
+          "id": "launch",
+          "title": "1. Calendar event",
+          "description": "No RunAtLoad and no KeepAlive: registering the agent never triggers a scan.",
+          "steps": [
+            {
+              "type": "message",
+              "id": "fire",
+              "from": "launchd",
+              "to": "job",
+              "title": "StartCalendarInterval 03:00 with pinned Bun and a fixed PATH",
+              "kind": "async"
+            },
+            {
+              "type": "message",
+              "id": "open",
+              "from": "job",
+              "to": "web",
+              "title": "POST /api/scan over HTTP; no database access in the job",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "wire",
+              "from": "web",
+              "to": "wiring",
+              "title": "Use collector wiring from the pinned build",
+              "kind": "call",
+              "description": "Source changes cannot alter the scheduled scanner before deployment."
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "share-db",
+          "title": "2. Acquire the scan lease",
+          "steps": [
+            {
+              "type": "message",
+              "id": "scan",
+              "from": "web",
+              "to": "scanner",
+              "title": "start({ reason: manual, refresh: changed })",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "acquire",
+              "from": "scanner",
+              "to": "sqlite",
+              "title": "INSERT scan_runs with lease owner unless a fresh heartbeat exists",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "web-refused",
+              "from": "web",
+              "to": "sqlite",
+              "title": "A manual POST /api/scan during the run sees the active lease and answers 409",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "web-reads",
+              "from": "web",
+              "to": "sqlite",
+              "title": "Dashboard reads continue against the last committed rows",
+              "kind": "call"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "run",
+          "title": "3. Changed policy",
+          "description": "scripts/scan.ts defaults to changed: git, TD, and stack every time, cloc only where the tracked worktree fingerprint moved, then baselines and GitHub when due.",
+          "steps": [
+            {
+              "type": "message",
+              "id": "writes",
+              "from": "scanner",
+              "to": "sqlite",
+              "title": "Serialized metric writes with lease checks",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "done",
+              "from": "scanner",
+              "to": "web",
+              "title": "Persist terminal result for this run",
+              "kind": "return"
+            },
+            {
+              "type": "message",
+              "id": "close",
+              "from": "job",
+              "to": "web",
+              "title": "GET /api/scan?runId=... until terminal; JSON result and nonzero on failure",
+              "kind": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decision-edit",
+      "title": "Editing a field in the table",
+      "description": "An optimistic edit. The browser validates the patch and re-runs the attention rules with exactly the functions the server runs, so the row moves before the request is sent; the server's answer replaces it, and a refusal puts the kept entry back with the API's own message. Undo is the inverse patch through the same endpoint, which is why `ongoing set` can do everything this does.",
+      "status": "current",
+      "provenance": "Authored 2026-09-12 from src/routes/(inventory)/+page.svelte, src/lib/ui/catalog.svelte.ts, src/lib/domain/optimistic.ts, src/routes/api/entries/[kind]/[slug]/+server.ts, and src/lib/domain/fields.ts.",
+      "participants": [
+        {
+          "id": "person",
+          "title": "Marcus",
+          "color": "#759EB5"
+        },
+        {
+          "id": "shell",
+          "element": "inventory.shell",
+          "title": "Inventory shell"
+        },
+        {
+          "id": "optimistic",
+          "element": "inventory.optimistic",
+          "title": "Optimistic edit"
+        },
+        {
+          "id": "registry",
+          "element": "inventory.registry",
+          "title": "Field registry"
+        },
+        {
+          "id": "attention",
+          "element": "domain.attention",
+          "title": "Attention rules"
+        },
+        {
+          "id": "api",
+          "element": "inventory.entries_api",
+          "title": "Entries API"
+        },
+        {
+          "id": "repo",
+          "element": "catalog.repository",
+          "title": "Repository"
+        }
+      ],
+      "groups": [
+        {
+          "id": "browser",
+          "title": "Browser",
+          "participants": ["shell", "optimistic"]
+        },
+        {
+          "id": "rules",
+          "title": "Pure rules (run on both sides)",
+          "participants": ["registry", "attention"]
+        },
+        {
+          "id": "server",
+          "title": "Web process",
+          "participants": ["api", "repo"]
+        }
+      ],
+      "steps": [
+        {
+          "type": "phase",
+          "id": "apply-locally",
+          "title": "1. Move the row before anything is sent",
+          "steps": [
+            {
+              "type": "message",
+              "id": "choose",
+              "from": "person",
+              "to": "shell",
+              "title": "e, then set intent to invest",
+              "kind": "call",
+              "description": "The cell opens the editor the field's registered type asks for."
+            },
+            {
+              "type": "message",
+              "id": "apply",
+              "from": "shell",
+              "to": "optimistic",
+              "title": "applyPatch(entry, { intent: 'invest' })",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "validate-local",
+              "from": "optimistic",
+              "to": "registry",
+              "title": "validateEntryPatch(registry, kind, patch)",
+              "kind": "call",
+              "description": "A refusal here never leaves the browser, and it is the message the CLI would print."
+            },
+            {
+              "type": "message",
+              "id": "reclassify",
+              "from": "optimistic",
+              "to": "attention",
+              "title": "classifyAttentionViews(entry with the new intent)",
+              "kind": "call",
+              "description": "Dormant requires an intent other than invest, so the row can leave that view before the server answers."
+            },
+            {
+              "type": "message",
+              "id": "moved",
+              "from": "optimistic",
+              "to": "shell",
+              "title": "A new entry, re-classified; the old one is kept for a rollback",
+              "kind": "return"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "persist",
+          "title": "2. Persist through the endpoint the CLI uses",
+          "steps": [
+            {
+              "type": "message",
+              "id": "patch",
+              "from": "shell",
+              "to": "api",
+              "title": "PATCH /api/entries/project/<slug> { intent: 'invest' }",
+              "kind": "call",
+              "description": "`ongoing set <entry> intent invest` sends the same body to the same route."
+            },
+            {
+              "type": "message",
+              "id": "validate-server",
+              "from": "api",
+              "to": "registry",
+              "title": "validateEntryPatch \u2014 the one path from an untrusted patch to stored values",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "write",
+              "from": "api",
+              "to": "repo",
+              "title": "patchEntry(id, patch)",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "ok",
+              "from": "api",
+              "to": "shell",
+              "title": "200 \u2014 the whole re-read entry, which replaces the optimistic row",
+              "kind": "return"
+            },
+            {
+              "type": "message",
+              "id": "refused",
+              "from": "api",
+              "to": "shell",
+              "title": "400 \u2014 the kept entry goes back and the reason is shown beside the cell",
+              "kind": "return",
+              "description": "No toast, no spinner: quiet recovery, inline, where the edit happened."
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "undo",
+          "title": "3. Undo is a patch like any other",
+          "steps": [
+            {
+              "type": "message",
+              "id": "press-u",
+              "from": "person",
+              "to": "shell",
+              "title": "u",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "inverse",
+              "from": "shell",
+              "to": "optimistic",
+              "title": "inversePatch(entry before the edit, patch)",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "undo-patch",
+              "from": "shell",
+              "to": "api",
+              "title": "PATCH the previous value \u2014 validated and re-classified the same way",
+              "kind": "call"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "proposed-field-add",
+      "title": "Adding a field is a row, not a migration",
+      "description": "A user field registered from the shell is immediately valid to set on an entry and visible everywhere the catalog is read \u2014 no schema change, no frontend change. Filtering on it by name arrives with the query grammar in Phase 2.",
+      "status": "current",
+      "provenance": "Authored 2026-09-11 from docs/plans/implemented/ongoing-inventory-redesign.md and ADRs 0005 and 0006; rewritten the same day against the shipped Phase 1 code (bin/ongoing.ts, src/routes/api/fields/+server.ts, src/routes/api/entries, src/lib/domain/fields.ts) and exercised end to end in tests/e2e/entries.test.ts.",
+      "participants": [
+        {
+          "id": "shell",
+          "title": "Shell or agent",
+          "color": "#759EB5"
+        },
+        {
+          "id": "cli",
+          "element": "inventory.entry_cli",
+          "title": "ongoing"
+        },
+        {
+          "id": "api",
+          "element": "inventory.entries_api",
+          "title": "Entries API"
+        },
+        {
+          "id": "registry",
+          "element": "inventory.registry",
+          "title": "Field registry"
+        },
+        {
+          "id": "repo",
+          "element": "catalog.repository",
+          "title": "Repository"
+        }
+      ],
+      "groups": [
+        {
+          "id": "core",
+          "title": "One process",
+          "participants": ["api", "registry", "repo"]
+        }
+      ],
+      "steps": [
+        {
+          "type": "phase",
+          "id": "register",
+          "title": "1. Register the field",
+          "description": "Owner user, so the API may create and delete it; core and provider fields are not editable this way.",
+          "steps": [
+            {
+              "type": "message",
+              "id": "field-add",
+              "from": "shell",
+              "to": "cli",
+              "title": "ongoing field add x.customer --type text --label Customer",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "field-post",
+              "from": "cli",
+              "to": "api",
+              "title": "POST /api/fields { key, kinds, type, label }",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "field-check",
+              "from": "api",
+              "to": "registry",
+              "title": "Validate the definition against the field-property rules",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "field-store",
+              "from": "api",
+              "to": "repo",
+              "title": "Insert the fields row; the registry reloads",
+              "kind": "call"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "assign",
+          "title": "2. Set it on an entry",
+          "description": "The same path a core field takes. There is no second write route for user fields.",
+          "steps": [
+            {
+              "type": "message",
+              "id": "set-cmd",
+              "from": "shell",
+              "to": "cli",
+              "title": "ongoing set acme-site x.customer acme",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "set-patch",
+              "from": "cli",
+              "to": "api",
+              "title": "PATCH /api/entries/project/acme-site { \"x.customer\": \"acme\" }",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "set-validate",
+              "from": "api",
+              "to": "registry",
+              "title": "validateEntryPatch(registry, 'project', patch)",
+              "kind": "call",
+              "description": "The CLI runs this identical pure function before sending, and the browser will too, so a bad value never leaves the client. An unknown key comes back naming the closest registered field."
+            },
+            {
+              "type": "message",
+              "id": "set-write",
+              "from": "api",
+              "to": "repo",
+              "title": "Merge into the entry's attributes document",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "set-ok",
+              "from": "api",
+              "to": "cli",
+              "title": "200 with the stored value",
+              "kind": "return"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "use",
+          "title": "3. Read it back",
+          "steps": [
+            {
+              "type": "message",
+              "id": "list-cmd",
+              "from": "shell",
+              "to": "cli",
+              "title": "ongoing get acme-site x.customer",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "list-get",
+              "from": "cli",
+              "to": "api",
+              "title": "GET /api/entries",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "list-read",
+              "from": "api",
+              "to": "repo",
+              "title": "Read entries, then project provider metrics into namespaced fields",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "list-rows",
+              "from": "api",
+              "to": "cli",
+              "title": "Every field the entry carries, stored and projected alike",
+              "kind": "return",
+              "description": "The dashboard payload carries the same attributes, so `ongoing show` and `ongoing list --json` see the new field without a second read model."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider-scan",
+      "title": "A scan on a machine that is not aerie",
+      "description": "No td, no cloc, no gh, no GitHub token, no launchd. The scan completes, the missing providers are reported unavailable, nothing records a collector warning, and the rules that read their fields stay inert rather than wrong.",
+      "status": "current",
+      "provenance": "Authored 2026-09-11 from ADR 0007; observed 2026-09-12 once Phase 5 built it. tests/integration/providers.test.ts runs exactly this: a real scan in a child process whose PATH holds only git, asserting a completed run, zero collector errors, and provider_runs rows that name the missing command.",
+      "participants": [
+        {
+          "id": "shell",
+          "title": "Shell or agent",
+          "color": "#759EB5"
+        },
+        {
+          "id": "host",
+          "element": "inventory.host",
+          "title": "Host adapter (foreground)"
+        },
+        {
+          "id": "config",
+          "element": "inventory.config",
+          "title": "config.toml"
+        },
+        {
+          "id": "providers",
+          "element": "inventory.providers",
+          "title": "Provider registry"
+        },
+        {
+          "id": "registry",
+          "element": "inventory.registry",
+          "title": "Field registry"
+        },
+        {
+          "id": "scanner",
+          "element": "scanning.scanner",
+          "title": "Scanner"
+        },
+        {
+          "id": "repo",
+          "element": "catalog.repository",
+          "title": "Repository"
+        }
+      ],
+      "groups": [
+        {
+          "id": "proc",
+          "title": "One process",
+          "participants": ["providers", "registry", "scanner", "repo"]
+        }
+      ],
+      "steps": [
+        {
+          "type": "phase",
+          "id": "start",
+          "title": "1. Start without launchd",
+          "steps": [
+            {
+              "type": "message",
+              "id": "host-init",
+              "from": "shell",
+              "to": "host",
+              "title": "ongoing scan (no service answering, so the CLI links the core)",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "host-config",
+              "from": "host",
+              "to": "config",
+              "title": "Read ~/.config/ongoing/config.toml; env vars override",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "config-enabled",
+              "from": "config",
+              "to": "providers",
+              "title": "[providers]: filesystem, git, stack on; td, loc, github off or unavailable",
+              "kind": "async"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "declare",
+          "title": "2. Manifests decide what exists",
+          "description": "requires is checked before the provider runs, so unavailability is a reported state rather than a failure.",
+          "steps": [
+            {
+              "type": "message",
+              "id": "manifest-probe",
+              "from": "providers",
+              "to": "registry",
+              "title": "Probe each manifest's requires: commands on PATH, variables set",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "manifest-register",
+              "from": "providers",
+              "to": "registry",
+              "title": "Register only the enabled providers' namespaced fields",
+              "kind": "call",
+              "description": "No td provider means no td.* fields, so the attention rules that read them find nothing rather than something wrong."
+            },
+            {
+              "type": "message",
+              "id": "manifest-set",
+              "from": "providers",
+              "to": "scanner",
+              "title": "The active provider set, in dependsOn order",
+              "kind": "call"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "run",
+          "title": "3. Run what is available",
+          "steps": [
+            {
+              "type": "message",
+              "id": "scan-discover",
+              "from": "scanner",
+              "to": "repo",
+              "title": "filesystem provider: upsert entries and entry_sources for each root",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "scan-collect",
+              "from": "scanner",
+              "to": "repo",
+              "title": "git and stack write their namespaced fields; unavailable providers write nothing",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "scan-finish",
+              "from": "scanner",
+              "to": "repo",
+              "title": "finishScanRun(completed) + provider_runs rows saying who was skipped, and why",
+              "kind": "call"
+            }
+          ]
+        },
+        {
+          "type": "phase",
+          "id": "explain",
+          "title": "4. Say what is missing",
+          "steps": [
+            {
+              "type": "message",
+              "id": "providers-ask",
+              "from": "shell",
+              "to": "host",
+              "title": "ongoing providers",
+              "kind": "call"
+            },
+            {
+              "type": "message",
+              "id": "providers-report",
+              "from": "providers",
+              "to": "shell",
+              "title": "Each provider: state, availability, last run, contributed fields, why not",
+              "kind": "return"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
