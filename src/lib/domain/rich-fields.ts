@@ -59,13 +59,20 @@ export const impressionsLogoAdapter: RichFieldAdapter = {
 function isMissingOverlay(error: unknown): boolean {
   // Node/Bun resolution failures, Vite dev SSR misses, and browser bare-specifier
   // failures all land here; anything the parser itself threw must propagate.
-  return (
-    error instanceof Error &&
-    (/Cannot find (package|module)|ERR_MODULE_NOT_FOUND|Failed to resolve|failed to resolve/i.test(
-      error.message
-    ) ||
-      error instanceof TypeError)
-  );
+  if ((typeof error !== 'object' || error === null) && typeof error !== 'function') return false;
+
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  if (typeof message !== 'string') return false;
+
+  const missingModule =
+    /Cannot find (?:module|package) ['"]@impressions\/logo\/document['"]/i.test(message) ||
+    /Cannot find package ['"]@impressions\/logo['"]/i.test(message);
+  const failedResolution =
+    /Failed to resolve (?:import|module specifier) ['"]@impressions\/logo\/document['"]/i.test(
+      message
+    );
+
+  return (code === 'ERR_MODULE_NOT_FOUND' && missingModule) || failedResolution;
 }
 
 export const portableJsonAdapter: RichFieldAdapter = {

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -26,6 +26,14 @@ const required = [
   '--database',
   PRODUCTION_DATABASE
 ];
+
+const isAerieDeploymentHost =
+  process.platform === 'darwin' &&
+  !process.env.CI &&
+  hostname()
+    .toLowerCase()
+    .replace(/\.local$/, '') === 'aerie' &&
+  homedir() === '/Users/marcus';
 
 describe('release tooling', () => {
   it('requires all three exact production targets', () => {
@@ -209,7 +217,7 @@ describe('production LaunchAgent definitions', () => {
 
   // Machine-bound: the PATH string is asserted above; this spawn probe needs Aerie's real
   // Homebrew/mise tools and must not fail GitHub's ubuntu runners (or any non-Aerie host).
-  it.skipIf(process.platform !== 'darwin' || Boolean(process.env.CI))(
+  it.runIf(isAerieDeploymentHost)(
     'resolves every scheduled tool with only the launchd PATH',
     async () => {
       // launchd gives the agent this PATH and nothing else from a shell — but it does set HOME, and
