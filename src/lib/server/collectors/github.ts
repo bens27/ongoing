@@ -86,6 +86,8 @@ function classifyOrigin(value: string): GitHubOriginResult {
   const github = parseGitHubRemote(trimmed);
   if (github) return { status: 'github', remote: github };
 
+  if (/^(?:\/(?!\/)|\.\.?\/)/.test(trimmed)) return { status: 'non_github' };
+
   const scp = trimmed.match(/^[^@\s]+@([^:\s]+):(.+)$/);
   if (scp)
     return scp[1].toLowerCase() === 'github.com'
@@ -93,6 +95,7 @@ function classifyOrigin(value: string): GitHubOriginResult {
       : { status: 'non_github' };
   try {
     const url = new URL(trimmed);
+    if (url.protocol === 'file:') return { status: 'non_github' };
     if (!['https:', 'http:', 'ssh:', 'git:'].includes(url.protocol))
       return { status: 'error', message: 'Unable to read Git origin: unsupported command output' };
     return url.hostname.toLowerCase() === 'github.com'

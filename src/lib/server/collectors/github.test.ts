@@ -392,6 +392,112 @@ describe('cached GitHub enrichment', () => {
   });
 
   it.each([
+    ['/code/agent-ready', 'an absolute local path'],
+    ['./agent-ready', 'a current-directory relative path'],
+    ['../agent-ready', 'a parent-directory relative path'],
+    ['file:///code/agent-ready', 'a file URL']
+  ])('treats %s as %s without network enrichment', async (remote) => {
+    const { database, repository, project } = await fixture();
+    await repository.updateMetrics(project.id, {
+      githubRepoId: 'R_cached',
+      githubOwner: 'cached-owner',
+      githubName: 'cached-repo',
+      githubStars: 99,
+      githubTrafficViews: 200,
+      githubAvailability: 'available',
+      githubTrafficAvailability: 'available',
+      githubScannedAt: '2026-07-18T10:00:00Z',
+      githubTrafficScannedAt: '2026-07-18T11:00:00Z'
+    });
+    await repository.recordCollectionError({
+      projectId: project.id,
+      collector: 'hosting',
+      message: 'Unable to read Git origin: malformed command output',
+      occurredAt: '2026-07-18T12:00:00Z'
+    });
+    const fake = provider();
+    const availability = vi.spyOn(fake, 'availability');
+    const collectMany = vi.spyOn(fake, 'collectMany');
+    const collectTraffic = vi.spyOn(fake, 'collectTraffic');
+    const localOrigin: CommandRunner = async (_command, options) => ({
+      command: ['git'],
+      cwd: options.cwd,
+      stdout: `${remote}\n`,
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      aborted: false
+    });
+
+    const result = await collectGitHubEnrichment(repository, [project], {
+      provider: fake,
+      runner: localOrigin,
+      now: () => now
+    });
+
+    expect(result).toEqual({ errorCount: 0, updatedProjectIds: [] });
+    expect(repository.getMetrics(project.id)).toMatchObject({
+      githubRepoId: null,
+      githubOwner: null,
+      githubName: null,
+      githubStars: null,
+      githubTrafficViews: null,
+      githubAvailability: 'unavailable',
+      githubTrafficAvailability: 'unavailable',
+      githubScannedAt: null,
+      githubTrafficScannedAt: null
+    });
+    expect(repository.listCollectionErrors(project.id, true)).toEqual([]);
+    expect(availability).not.toHaveBeenCalled();
+    expect(collectMany).not.toHaveBeenCalled();
+    expect(collectTraffic).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it.each([
+    ['https://github.com/owner/repo.git\nhttps://example.com/injected', 'malformed command output'],
+    ['s3://bucket/repo.git', 'unsupported command output']
+  ])('preserves cached data for unsafe origin output: %s', async (stdout, message) => {
+    const { database, repository, project } = await fixture();
+    await repository.updateMetrics(project.id, {
+      githubRepoId: 'R_cached',
+      githubStars: 99,
+      githubTrafficViews: 200,
+      githubAvailability: 'available'
+    });
+    const unsafeOrigin: CommandRunner = async (_command, options) => ({
+      command: ['git'],
+      cwd: options.cwd,
+      stdout,
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      aborted: false
+    });
+
+    const result = await collectGitHubEnrichment(repository, [project], {
+      provider: provider(),
+      runner: unsafeOrigin,
+      now: () => now
+    });
+
+    expect(result).toEqual({ errorCount: 1, updatedProjectIds: [] });
+    expect(repository.getMetrics(project.id)).toMatchObject({
+      githubRepoId: 'R_cached',
+      githubStars: 99,
+      githubTrafficViews: 200,
+      githubAvailability: 'available'
+    });
+    expect(repository.listCollectionErrors(project.id, true)).toEqual([
+      expect.objectContaining({
+        collector: 'hosting',
+        message: `Unable to read Git origin: ${message}`
+      })
+    ]);
+    database.close();
+  });
+
+  it.each([
     ['timeout', { exitCode: null, timedOut: true, aborted: false, stderr: '' }],
     ['abort', { exitCode: null, timedOut: false, aborted: true, stderr: '' }],
     ['nonzero', { exitCode: 128, timedOut: false, aborted: false, stderr: 'fatal: local failure' }]
