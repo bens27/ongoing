@@ -42,9 +42,8 @@ export const impressionsLogoAdapter: RichFieldAdapter = {
     // over the canonical document still pins exactly what was stored.
     let parse: ((candidate: unknown) => void) | undefined;
     try {
-      ({ parseLogoDocument: parse } = await import(
-        /* @vite-ignore */ '@impressions/logo/document'
-      ));
+      const documentModule: string = '@impressions/logo/document';
+      ({ parseLogoDocument: parse } = await import(/* @vite-ignore */ documentModule));
     } catch (error) {
       if (!isMissingOverlay(error)) throw error;
     }
