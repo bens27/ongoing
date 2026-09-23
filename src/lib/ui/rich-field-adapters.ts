@@ -16,11 +16,17 @@ const adapters = new Map<string, RichFieldUiAdapter>([
     {
       posterPart: 'poster',
       async mount(host, document, ready, failed) {
-        // @vite-ignore keeps both imports runtime-resolved so public builds pass without
-        // the private overlay; a rejection falls back to the poster via the caller's catch.
+        // Nonliteral specifiers plus @vite-ignore defer resolution of the optional overlay.
+        // A missing package falls back to the poster via the caller's catch.
+        const viewerModule = '@impressions/logo/viewer';
+        const documentModule = '@impressions/logo/document';
         const [{ mountLogoViewer }, { parseLogoDocument }] = await Promise.all([
-          import(/* @vite-ignore */ '@impressions/logo/viewer'),
-          import(/* @vite-ignore */ '@impressions/logo/document')
+          import(/* @vite-ignore */ viewerModule) as Promise<
+            typeof import('@impressions/logo/viewer')
+          >,
+          import(/* @vite-ignore */ documentModule) as Promise<
+            typeof import('@impressions/logo/document')
+          >
         ]);
         const parsed = parseLogoDocument(document);
         const viewer = mountLogoViewer(host, parsed, {
