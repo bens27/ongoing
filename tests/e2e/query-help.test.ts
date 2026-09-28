@@ -45,3 +45,34 @@ test('query help fits a phone and keeps the close control reachable', async ({ p
   await page.getByRole('button', { name: 'Close query help' }).click();
   await expect(dialog).not.toBeVisible();
 });
+
+test('a queued close event does not dismiss reopened query help', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('data-hydrated', 'true');
+  const trigger = page.getByRole('button', { name: 'Query language help' });
+  const dialog = page.getByRole('dialog', { name: 'Query the catalog' });
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+
+  // Native close events are queued. Hold one until after reopening to reproduce
+  // the CI ordering without relying on browser frame timing or arbitrary sleeps.
+  await dialog.evaluate((node) => {
+    node.addEventListener(
+      'close',
+      (event) => {
+        event.stopImmediatePropagation();
+        node.setAttribute('data-close-held', 'true');
+      },
+      { capture: true, once: true }
+    );
+  });
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('[data-close-held]')).toHaveCount(1);
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await dialog.dispatchEvent('close');
+  await expect(dialog).toBeVisible();
+  await page.getByRole('button', { name: 'Available fields', exact: true }).click();
+  await expect(page.getByRole('searchbox', { name: 'Search query fields' })).toBeVisible();
+});

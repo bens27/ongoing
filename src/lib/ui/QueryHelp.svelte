@@ -71,7 +71,10 @@
 <dialog
   bind:this={dialog}
   aria-labelledby="query-help-title"
-  onclose={() => (open = false)}
+  onclose={() => {
+    // A native close event can arrive after the dialog has already reopened.
+    if (!dialog?.open) open = false;
+  }}
   onkeydown={(event) => {
     event.stopPropagation();
     if (event.key === 'Escape') {

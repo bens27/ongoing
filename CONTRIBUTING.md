@@ -16,11 +16,15 @@ bun run lint
 bun run test
 bun run check
 bun run build
+E2E_PORT=7801 bun run test:e2e
 QA_SCREENSHOTS=1 E2E_PORT=7801 bun run test:e2e tests/e2e/screenshots.test.ts
 ```
 
 `bun run test:e2e` is the full Playwright suite (Chromium); the last line regenerates
-the UI screenshots in `docs/qa/screens/` that the README references.
+the UI screenshots in `docs/qa/screens/` that the README references. Screenshot
+coverage does not replace the full browser suite. Install Chromium with
+`bunx playwright install chromium`, and make `cloc` and `td` available on `PATH`,
+as CI does, so provider fields used by the browser and CLI tests are registered.
 
 ## Conventions
 
