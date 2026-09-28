@@ -26,7 +26,8 @@
     "smoke": "\"$npm_execpath\" run scripts/smoke.ts",
     "migrate": "\"$npm_execpath\" run scripts/migrate.ts",
     "scan": "\"$npm_execpath\" run src/lib/host/scan-command.ts",
-    "serve": "\"$npm_execpath\" run src/lib/host/production-server.ts"
+    "serve": "\"$npm_execpath\" run src/lib/host/production-server.ts",
+    "check:commits": "bun run scripts/check-commit-messages.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
